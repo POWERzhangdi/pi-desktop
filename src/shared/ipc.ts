@@ -56,6 +56,17 @@ export interface PiConfig {
 	cwd: string;
 	/** 自定义 Python 路径(OCR RapidOCR 用);未配置则用系统 python */
 	pythonPath?: string;
+	/** 运行时解析详情(设置面板展示来源用);resolveConfig 时附带填充 */
+	runtimeInfo?: RuntimeInfo;
+}
+
+/** 运行时解析来源:env=环境变量,config=配置文件,detected=自动检测,bundled=内置兜底,missing=缺失 */
+export type RuntimeSource = "env" | "config" | "detected" | "bundled" | "missing";
+
+/** 运行时解析详情(pi / Node 各自从哪来) */
+export interface RuntimeInfo {
+	node: { path: string; source: RuntimeSource };
+	cli: { path: string; source: RuntimeSource };
 }
 
 /** 运行环境检测结果(设置面板展示:pi / Node / Python 路径与版本 + rapidocr 是否就绪) */

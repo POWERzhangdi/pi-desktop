@@ -1,30 +1,52 @@
 /**
  * 运行环境与 OCR 设置面板(居中 Modal)。
  * - 运行环境:检测并展示 pi / Node / Python 的路径与版本(未检测到则提示)
+ * - 运行时来源:env=环境变量 / config=自定义 / detected=全局检测 / bundled=内置兜底 / missing=缺失
  * - OCR 引擎:tesseract(默认,纯 JS) / RapidOCR(强,需 Python+包);RapidOCR 未就绪时傻瓜式引导安装
  * Python 缺失给 winget 安装指引;rapidocr 未装提供"一键安装"按钮,点击弹出终端风格进度弹窗(逐行日志 + 闪烁光标)。
  */
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSessionStore } from "../store/useSessionStore";
-import type { EnvInfo, PiConfig } from "../../../shared/ipc";
+import type { EnvInfo, PiConfig, RuntimeSource } from "../../../shared/ipc";
 import McpManagerPanel from "./McpManagerPanel";
 
-/** 环境项行:徽章 + 名称 + 就绪状态 + 路径(可编辑) + 版本 */
+const SOURCE_LABEL: Record<RuntimeSource, string> = {
+	env: "环境变量",
+	config: "自定义",
+	detected: "全局检测",
+	bundled: "内置",
+	missing: "缺失",
+};
+
+const SOURCE_CLASS: Record<RuntimeSource, string> = {
+	env: "text-orange bg-orange/10",
+	config: "text-orange bg-orange/10",
+	detected: "text-green bg-green/10",
+	bundled: "text-accent bg-accent-soft",
+	missing: "text-red bg-red/10",
+};
+
+/** 环境项行:徽章 + 名称 + 来源徽章 + 就绪状态 + 路径(可编辑) + 版本 */
 function EnvRow({
 	badge,
 	name,
 	ok,
 	path,
 	version,
+	source,
 	onSave,
+	onReset,
 }: {
 	badge: string;
 	name: string;
 	ok: boolean;
 	path: string;
 	version?: string | null;
+	source?: RuntimeSource;
 	onSave?: (p: string) => void;
+	/** 清空手动配置,回到自动检测/内置兜底链 */
+	onReset?: () => void;
 }) {
 	const [editing, setEditing] = useState(false);
 	const [val, setVal] = useState(path);
@@ -42,6 +64,11 @@ function EnvRow({
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<span className="text-sm font-medium">{name}</span>
+					{source && (
+						<span className={`text-[10px] px-1.5 py-0.5 rounded ${SOURCE_CLASS[source]}`}>
+							{SOURCE_LABEL[source]}
+						</span>
+					)}
 					{ok ? (
 						<span className="text-[10px] text-green">✓ 就绪</span>
 					) : (
@@ -56,6 +83,15 @@ function EnvRow({
 							className="text-[10px] text-txt2 hover:text-accent btn-press hover:bg-side rounded px-1.5 py-0.5"
 						>
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+						</button>
+					)}
+					{onReset && (source === "config" || source === "env") && (
+						<button
+							onClick={onReset}
+							title="清空手动配置,恢复自动检测/内置兜底"
+							className="text-[10px] text-txt2 hover:text-accent btn-press hover:bg-side rounded px-1.5 py-0.5"
+						>
+							恢复自动
 						</button>
 					)}
 				</div>
@@ -95,6 +131,7 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 		}
 	});
 	const [envTs, setEnvTs] = useState<number | null>(() => Number(localStorage.getItem("pi-desktop-env-ts")) || null);
+	const [runtime, setRuntime] = useState<PiConfig["runtimeInfo"] | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [installing, setInstalling] = useState(false);
 	const [installLog, setInstallLog] = useState<string[]>([]);
@@ -117,12 +154,15 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 			setEnvTs(ts);
 			localStorage.setItem("pi-desktop-env", JSON.stringify(e));
 			localStorage.setItem("pi-desktop-env-ts", String(ts));
+			// 运行时来源(env/config/detected/bundled/missing)每次刷新取最新
+			const cfg = await window.piApi.getConfig();
+			setRuntime(cfg.runtimeInfo ?? null);
 		} finally {
 			setLoading(false);
 		}
 	};
 
-	// 打开时:有记住的结果就不重复检测,无则检测一次
+	// 打开时:有记住的结果就不重复检测,无则检测一次;运行时来源同步拉一次
 	useEffect(() => {
 		if (open && !env) void refresh();
 	}, [open]);
@@ -166,6 +206,13 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 			`${key === "cliPath" ? "pi" : key === "nodePath" ? "Node" : "Python"} 路径已保存${key !== "pythonPath" ? ",重启后端生效" : ""}`,
 			"info",
 		);
+		await refresh();
+	};
+
+	/** 恢复自动:清空手动配置,回到自动检测/内置兜底链 */
+	const resetPath = async (key: "cliPath" | "nodePath") => {
+		await window.piApi.configSet({ [key]: "" } as Partial<PiConfig>);
+		pushToast(`${key === "cliPath" ? "pi" : "Node"} 已恢复自动检测`, "info");
 		await refresh();
 	};
 
@@ -241,15 +288,19 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 										ok={env?.pi.ok ?? false}
 										path={env?.pi.path ?? ""}
 										version={env?.pi.version}
+										source={runtime?.cli.source}
 										onSave={(p) => void savePath("cliPath", p)}
+										onReset={() => void resetPath("cliPath")}
 									/>
 									<EnvRow
 										badge="N"
 										name="Node.js"
-										ok={true}
+										ok={!!env?.node.path && runtime?.node.source !== "missing"}
 										path={env?.node.path ?? ""}
 										version={env?.node.version}
+										source={runtime?.node.source}
 										onSave={(p) => void savePath("nodePath", p)}
+										onReset={() => void resetPath("nodePath")}
 									/>
 									<EnvRow
 										badge="Py"
@@ -348,62 +399,62 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 						{tab === "mcp" && <McpManagerPanel />}
 					</div>
 				</div>
-			</div>
 
-			{/* 安装进度弹窗(终端风格,覆盖在设置面板之上) */}
-			{installOpen && (
-				<div
-					className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
-					onClick={(e) => {
-						e.stopPropagation();
-						if (!installing) closeInstall();
-					}}
-				>
-					<div className="animate-modal w-[560px] rounded-xl overflow-hidden shadow-2xl border border-sep bg-card">
-						{/* 终端标题栏:红黄绿圆点 + 标题 */}
-						<div className="flex items-center gap-2 px-4 py-2.5 bg-side border-b border-sep">
-							<span className="w-3 h-3 rounded-full bg-red" />
-							<span className="w-3 h-3 rounded-full bg-orange" />
-							<span className="w-3 h-3 rounded-full bg-green" />
-							<span className="ml-2 text-xs text-txt2 font-mono">rapidocr-install — bash</span>
-						</div>
-						{/* 终端主体:黑底 monospace,逐行日志 + 闪烁光标 */}
-						<div
-							ref={termRef}
-							className="bg-[#0d1117] p-4 h-72 overflow-auto font-mono text-[12px] leading-relaxed"
-						>
-							<div className="text-green">$ python -m pip install rapidocr-onnxruntime</div>
-							{installLog.map((line, i) => (
-								<div key={i} className="text-txt2/80 whitespace-pre-wrap break-all">
-									{line}
-								</div>
-							))}
-							{installing && <div className="text-green animate-pulse">▋</div>}
-							{installDone === "ok" && <div className="text-green mt-1">✓ 安装完成</div>}
-							{installDone === "error" && <div className="text-red mt-1">✗ 安装失败,见上方日志</div>}
-						</div>
-						{/* 底栏:状态 + 关闭按钮 */}
-						<div className="flex items-center justify-between px-4 py-2.5 border-t border-sep">
-							<span className="text-xs text-txt2">
-								{installing
-									? "正在安装…(约 1-2 分钟,下载约 100MB)"
-									: installDone === "ok"
-										? "RapidOCR 已就绪,可切换引擎"
-										: "安装失败,请检查日志"}
-							</span>
-							{!installing && (
-								<button
-									onClick={closeInstall}
-									className="text-xs bg-accent text-white rounded-lg px-3 py-1.5 hover:opacity-90"
-								>
-									关闭
-								</button>
-							)}
+				{/* 安装进度弹窗(终端风格,覆盖在设置面板之上) */}
+				{installOpen && (
+					<div
+						className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+						onClick={(e) => {
+							e.stopPropagation();
+							if (!installing) closeInstall();
+						}}
+					>
+						<div className="animate-modal w-[560px] rounded-xl overflow-hidden shadow-2xl border border-sep bg-card">
+							{/* 终端标题栏:红黄绿圆点 + 标题 */}
+							<div className="flex items-center gap-2 px-4 py-2.5 bg-side border-b border-sep">
+								<span className="w-3 h-3 rounded-full bg-red" />
+								<span className="w-3 h-3 rounded-full bg-orange" />
+								<span className="w-3 h-3 rounded-full bg-green" />
+								<span className="ml-2 text-xs text-txt2 font-mono">rapidocr-install — bash</span>
+							</div>
+							{/* 终端主体:黑底 monospace,逐行日志 + 闪烁光标 */}
+							<div
+								ref={termRef}
+								className="bg-[#0d1117] p-4 h-72 overflow-auto font-mono text-[12px] leading-relaxed"
+							>
+								<div className="text-green">$ python -m pip install rapidocr-onnxruntime</div>
+								{installLog.map((line, i) => (
+									<div key={i} className="text-txt2/80 whitespace-pre-wrap break-all">
+										{line}
+									</div>
+								))}
+								{installing && <div className="text-green animate-pulse">▋</div>}
+								{installDone === "ok" && <div className="text-green mt-1">✓ 安装完成</div>}
+								{installDone === "error" && <div className="text-red mt-1">✗ 安装失败,见上方日志</div>}
+							</div>
+							{/* 底栏:状态 + 关闭按钮 */}
+							<div className="flex items-center justify-between px-4 py-2.5 border-t border-sep">
+								<span className="text-xs text-txt2">
+									{installing
+										? "正在安装…(约 1-2 分钟,下载约 100MB)"
+										: installDone === "ok"
+											? "RapidOCR 已就绪,可切换引擎"
+											: "安装失败,请检查日志"}
+								</span>
+								{!installing && (
+									<button
+										onClick={closeInstall}
+										className="text-xs bg-accent text-white rounded-lg px-3 py-1.5 hover:opacity-90"
+									>
+										关闭
+									</button>
+								)}
+							</div>
 						</div>
 					</div>
+				)}
 				</div>
-			)}
-		</div>,
-		document.body,
-	);
+			</div>,
+			document.body,
+		);
 }

@@ -79,6 +79,8 @@ export function ModelPicker() {
 	const [query, setQuery] = useState("");
 	const currentKey = sessionState?.model ? `${sessionState.model.provider}/${sessionState.model.id}` : "";
 	const currentProvider = sessionState?.model?.provider ?? "";
+	// pi 未配置模型时返回 id/name 均为 "unknown" 的占位对象,视为"未配置"
+	const isPlaceholder = !sessionState?.model || sessionState.model.id === "unknown";
 	const [selProvider, setSelProvider] = useState(currentProvider);
 	// 当前模型变化时,左侧供应商选中跟随(下次打开即定位到当前供应商)
 	useEffect(() => {
@@ -118,8 +120,12 @@ export function ModelPicker() {
 
 	return (
 		<Popover
-			title={currentKey || "选择模型"}
-			button={<span className="truncate">{sessionState?.model?.name ?? "选择模型"}</span>}
+			title={isPlaceholder ? "尚未配置模型" : currentKey || "选择模型"}
+			button={
+				<span className={`truncate ${isPlaceholder ? "text-orange" : ""}`}>
+					{isPlaceholder ? "未配置模型" : sessionState?.model?.name ?? "选择模型"}
+				</span>
+			}
 		>
 			{(close) => (
 				<div className="w-[480px] flex flex-col">
@@ -133,7 +139,11 @@ export function ModelPicker() {
 						/>
 					</div>
 					{providers.length === 0 ? (
-						<div className="px-3 py-6 text-xs text-txt2 text-center">无匹配供应商</div>
+						<div className="px-3 py-6 text-xs text-txt2 text-center">
+							{query.trim()
+								? "无匹配供应商"
+								: "尚未配置模型,请到下方「管理模型」添加供应商和 API Key"}
+						</div>
 					) : (
 						<div className="flex max-h-80">
 							{/* 左:供应商 */}

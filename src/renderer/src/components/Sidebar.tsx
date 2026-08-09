@@ -9,7 +9,8 @@ import { useSessionStore } from "../store/useSessionStore";
 /** 左侧栏:品牌顶栏 + workspace 列表 + 底部固定操作栏(添加工作区/设置) */
 export default function Sidebar() {
 	const addWorkspace = useSessionStore((s) => s.addWorkspace);
-	const [envOpen, setEnvOpen] = useState(false);
+	const envOpen = useSessionStore((s) => s.envSettingsOpen);
+	const setEnvOpen = useSessionStore((s) => s.setEnvSettingsOpen);
 	const [mcpOpen, setMcpOpen] = useState(false);
 	const mcpServers = useMcpStore((s) => s.servers);
 	const loadMcp = useMcpStore((s) => s.load);

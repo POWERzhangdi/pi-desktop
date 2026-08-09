@@ -11,6 +11,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import type { McpServerConfig, McpTestResult } from "../shared/ipc";
+import { runNpmInstall } from "./proc";
 
 interface McpConfigFile {
 	servers?: McpServerConfig[];
@@ -89,21 +90,6 @@ export async function ensureMcpExtension(sourceDir: string, destDir: string): Pr
 	if (!existsSync(sdkPath)) {
 		await runNpmInstall(destDir);
 	}
-}
-
-function runNpmInstall(cwd: string): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-		const proc = spawn(npm, ["install", "--omit=dev", "--no-audit", "--no-fund"], {
-			cwd,
-			windowsHide: true,
-			stdio: "ignore",
-		});
-		proc.on("error", (err) => reject(new Error(`npm 启动失败: ${err.message}`)));
-		proc.on("close", (code) =>
-			code === 0 ? resolve() : reject(new Error(`npm install 失败,退出码 ${code}`)),
-		);
-	});
 }
 
 /** 用扩展目录里的 probe.mjs 连接一次 server 并 list_tools */

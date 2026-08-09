@@ -13,6 +13,7 @@ import {
 import type { RpcClientPool } from "./rpc/pool";
 import { writeConfigFile } from "./rpc/client";
 import { unlink, rename } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { scanSessions } from "./sessions/scanner";
@@ -21,7 +22,7 @@ import { listFiles, warmCache } from "./files";
 import { ProvidersStore, testProviderConnection } from "./providers";
 import { pdfExtract, excelExtract, ocrRecognize, checkEnv, installRapidocr } from "./extension";
 import { McpStore, ensureMcpExtension, testMcpServer } from "./mcp";
-import { syncBundledPlugins } from "./plugins";
+import { syncBundledPlugins, ensurePluginDeps } from "./plugins";
 
 function homeDir(): string {
 	return homedir();
@@ -56,9 +57,13 @@ function ensureBundledPlugins(): Promise<string[]> {
 		const sourceDir = app.isPackaged
 			? join(process.resourcesPath, "extensions", "bundled")
 			: join(app.getAppPath(), "extensions", "bundled");
-		pluginsSync = Promise.resolve().then(() =>
-			syncBundledPlugins(sourceDir, userExtensionsDir, app.getVersion()),
-		);
+		pluginsSync = Promise.resolve()
+			.then(() => syncBundledPlugins(sourceDir, userExtensionsDir, app.getVersion()))
+			.then((changed) =>
+				// pi 启动时会扫描 ~/.pi/agent/extensions/ 并加载全部扩展,
+				// 依赖必须提前装好,否则 pi 因缺模块直接退出
+				ensureBundledPluginDeps(sourceDir, userExtensionsDir).then(() => changed),
+			);
 		pluginsSync.catch(() => {
 			pluginsSync = null; // 失败允许下次重试
 		});
@@ -66,11 +71,28 @@ function ensureBundledPlugins(): Promise<string[]> {
 	return pluginsSync;
 }
 
+/** 为所有内置插件(顶层目录)预装 npm 依赖,并发且幂等(已有 node_modules 的跳过) */
+function ensureBundledPluginDeps(sourceDir: string, destDir: string): Promise<void> {
+	let names: string[] = [];
+	try {
+		names = readdirSync(sourceDir, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => e.name);
+	} catch {
+		return Promise.resolve();
+	}
+	return Promise.all(names.map((name) => ensurePluginDeps(destDir, name).catch(() => {}))).then(
+		() => undefined,
+	);
+}
+
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null, pool: RpcClientPool): void {
 	// 命令按 cwd 路由(进程懒启动;失败时 send 已 reject,Electron 会把错误抛回渲染进程)
-	ipcMain.handle(IpcChannels.rpcCommand, (_e, cwd: string, cmd: Record<string, unknown>) =>
-		pool.send(cwd, cmd),
-	);
+	ipcMain.handle(IpcChannels.rpcCommand, async (_e, cwd: string, cmd: Record<string, unknown>) => {
+		// pi 启动即加载全部内置扩展,首次命令前先确保其依赖已装好(失败不阻塞)
+		await ensureBundledPlugins().catch(() => {});
+		return pool.send(cwd, cmd);
+	});
 
 	ipcMain.handle(IpcChannels.sessionsList, async (_e, cwd?: string) => {
 		const list = await scanSessions(pool.config.sessionsDir);
@@ -81,7 +103,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null, pool:
 	ipcMain.handle(IpcChannels.configSet, async (_e, patch: Partial<PiConfig>) => {
 		writeConfigFile(patch);
 		pool.reloadConfig();
-		if (patch.cliPath || patch.nodePath) pool.restartAll();
+		// 注意:清空("" 恢复自动)也算改动,不能只判真值
+		if (patch.cliPath !== undefined || patch.nodePath !== undefined) pool.restartAll();
 	});
 
 	ipcMain.handle(IpcChannels.workspacesList, () => listWorkspaces(pool.config.sessionsDir));

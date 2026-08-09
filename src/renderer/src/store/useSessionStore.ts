@@ -697,6 +697,9 @@ interface SessionStore {
 	/** 模型管理页(全屏覆盖层)开关 */
 	modelManagerOpen: boolean;
 	setModelManagerOpen: (open: boolean) => void;
+	/** 环境设置弹窗开关(侧边栏设置按钮 + 首启引导横幅共用) */
+	envSettingsOpen: boolean;
+	setEnvSettingsOpen: (open: boolean) => void;
 	/** OCR 引擎:tesseract(默认,纯JS) / rapidocr(强,需 Python+包);持久化 localStorage */
 	ocrEngine: "tesseract" | "rapidocr";
 	setOcrEngine: (e: "tesseract" | "rapidocr") => void;
@@ -1189,6 +1192,9 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 
 		modelManagerOpen: false,
 		setModelManagerOpen: (open) => set({ modelManagerOpen: open }),
+
+		envSettingsOpen: false,
+		setEnvSettingsOpen: (open) => set({ envSettingsOpen: open }),
 
 		setOcrEngine: (e) => {
 			localStorage.setItem("ocrEngine", e);

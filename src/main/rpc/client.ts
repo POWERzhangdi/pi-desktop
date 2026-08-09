@@ -7,12 +7,13 @@
  */
 import { EventEmitter } from "node:events";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { createRequire } from "node:module";
 import { StringDecoder } from "node:string_decoder";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import type { PiConfig, BackendStatus } from "../../shared/ipc";
+import type { PiConfig, BackendStatus, RuntimeSource } from "../../shared/ipc";
+import { findOnPath } from "../proc";
 
 /** 响应等待超时(毫秒) */
 const RESPONSE_TIMEOUT_MS = 180_000;
@@ -53,62 +54,131 @@ export function writeConfigFile(patch: Partial<PiConfig>): void {
 	writeFileSync(file, JSON.stringify(merged, null, 2), "utf8");
 }
 
-/** 解析最终配置:环境变量 > 配置文件 > 默认值 */
+/** 解析最终配置:环境变量 > 配置文件 > 自动检测 > 内置兜底 */
 export function resolveConfig(): PiConfig {
 	const file = readConfigFile();
 	const home = homeDir();
 	const isWin = process.platform === "win32";
 	const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
 
-	// node:Windows 优先常见安装路径;mac/Linux 直接用 PATH 上的 node(可用 PI_DESKTOP_NODE 覆盖)
-	const winDefaultNode = "C:\\Program Files\\nodejs\\node.exe";
-	const nodePath =
-		process.env.PI_DESKTOP_NODE ||
-		file.nodePath ||
-		(isWin && existsSync(winDefaultNode) ? winDefaultNode : "node");
+	// --- node:env/config 显式 > 自动检测 > 缺失(绝不退化成裸 "node",spawn 会 ENOENT) ---
+	let nodePath = process.env.PI_DESKTOP_NODE || file.nodePath || "";
+	const nodeSource: RuntimeSource = process.env.PI_DESKTOP_NODE
+		? "env"
+		: file.nodePath
+			? "config"
+			: (nodePath = detectNodePath())
+				? "detected"
+				: "missing";
 
-	const cliPath =
-		process.env.PI_DESKTOP_CLI ||
-		file.cliPath ||
-		resolveDefaultCliPath(home, isWin, appData) ||
-		resolveBundledCliPath();
+	// --- pi cli:env/config 显式 > 全局安装检测 > 内置兜底 ---
+	let cliPath = process.env.PI_DESKTOP_CLI || file.cliPath || "";
+	let cliSource: RuntimeSource = "missing";
+	if (cliPath) {
+		cliSource = process.env.PI_DESKTOP_CLI ? "env" : "config";
+	} else {
+		const detectedCli = detectGlobalCliPath(home, isWin, appData, nodePath);
+		const bundledCli = resolveBundledCliPath();
+		cliPath = detectedCli || bundledCli;
+		cliSource = cliPath ? (cliPath === bundledCli ? "bundled" : "detected") : "missing";
+	}
+
 	const sessionsDir = file.sessionsDir || join(home, ".pi", "agent", "sessions");
-	// 兜底 cwd:未配置时用 ~/projects
+	// 兜底 cwd:未配置时用 ~/projects;不存在则自动创建,避免 spawn 因 cwd 缺失 ENOENT
 	const cwd = file.cwd || join(home, "projects");
-	return { nodePath, cliPath, sessionsDir, cwd, pythonPath: file.pythonPath };
+	try {
+		mkdirSync(cwd, { recursive: true });
+	} catch {
+		/* 目录创建失败不阻塞配置解析 */
+	}
+	return {
+		nodePath,
+		cliPath,
+		sessionsDir,
+		cwd,
+		pythonPath: file.pythonPath,
+		runtimeInfo: {
+			node: { path: nodePath, source: nodeSource },
+			cli: { path: cliPath, source: cliSource },
+		},
+	};
 }
 
-/** 全局安装的 pi cli 默认路径 */
-function resolveDefaultCliPath(home: string, isWin: boolean, appData: string): string {
-	if (isWin) {
-		return join(appData, "npm", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
-	}
-	// mac/Linux:`npm root -g` 拿全局 node_modules 目录(兼容 npm/nvm/brew 安装),失败退回常见路径
+/**
+ * 自动探测 node:常见安装路径 > PATH(where/which)。
+ * Windows 不依赖 Electron 进程的 PATH 翻译,也不假设装在 Program Files。
+ * 找不到返回 ""。
+ */
+function detectNodePath(): string {
 	const candidates: string[] = [];
-	try {
-		const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
-		if (globalRoot) candidates.push(globalRoot);
-	} catch {
-		/* npm 不可用时退回常见路径 */
+	if (process.platform === "win32") {
+		candidates.push(join(process.env.ProgramFiles ?? "C:\\Program Files", "nodejs", "node.exe"));
+		if (process.env["ProgramFiles(x86)"]) {
+			candidates.push(join(process.env["ProgramFiles(x86)"], "nodejs", "node.exe"));
+		}
+		// nvm-windows:装的 node 是 %NVM_SYMLINK% 下的 node.exe
+		if (process.env.NVM_SYMLINK) {
+			candidates.push(join(process.env.NVM_SYMLINK, "node.exe"));
+		}
+	} else {
+		candidates.push("/usr/local/bin/node", "/opt/homebrew/bin/node", "/usr/bin/node");
 	}
-	candidates.push(
-		"/usr/local/lib/node_modules",
-		join(home, ".npm-global", "lib", "node_modules"),
-		"/opt/homebrew/lib/node_modules",
-	);
+	for (const p of candidates) {
+		if (existsSync(p)) return p;
+	}
+	const onPath = findOnPath("node");
+	return onPath && existsSync(onPath) ? onPath : "";
+}
+
+/**
+ * 探测全局安装的 pi cli。
+ * Windows:先查 APPDATA\npm 默认全局目录,再用解析出的 node 跑 npm-cli.js root -g
+ * (兼容 nvm/自定义 node 安装的全局根);mac/linux:直接用 npm root -g + 常见全局目录。
+ * 找不到返回 ""(交由内置兜底)。
+ */
+function detectGlobalCliPath(home: string, isWin: boolean, appData: string, nodePath: string): string {
+	const candidates: string[] = [];
+	if (isWin) {
+		candidates.push(join(appData, "npm", "node_modules"));
+		if (nodePath) {
+			const npmCli = join(dirname(nodePath), "node_modules", "npm", "bin", "npm-cli.js");
+			if (existsSync(npmCli)) {
+				try {
+					const root = execFileSync(nodePath, [npmCli, "root", "-g"], { encoding: "utf8" }).trim();
+					if (root) candidates.push(root);
+				} catch {
+					/* 拿不到全局根就跳过 */
+				}
+			}
+		}
+	} else {
+		try {
+			const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
+			if (globalRoot) candidates.push(globalRoot);
+		} catch {
+			/* npm 不可用时退回常见路径 */
+		}
+		candidates.push(
+			"/usr/local/lib/node_modules",
+			join(home, ".npm-global", "lib", "node_modules"),
+			"/opt/homebrew/lib/node_modules",
+		);
+	}
 	for (const root of candidates) {
 		const p = join(root, "@earendil-works", "pi-coding-agent", "dist", "cli.js");
 		if (existsSync(p)) return p;
 	}
-	// 全都没有:返回第一个候选,spawn 时给出清晰错误,设置面板可改路径
-	return join(candidates[0] ?? home, "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+	return "";
 }
 
 /** 客户端自带的 pi(作为 dependencies 打包进应用):本地没有全局 pi 时的兜底 */
 function resolveBundledCliPath(): string {
 	try {
-		const require = createRequire(import.meta.url);
-		return require.resolve("@earendil-works/pi-coding-agent/dist/cli.js");
+		// 包的 exports 只暴露 import 条件且未包含 dist/cli.js,无法用 require.resolve
+		// 直接按主进程位置向上找应用根 node_modules(开发与打包后均适用)
+		const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+		const cli = join(appRoot, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+		return existsSync(cli) ? cli : "";
 	} catch {
 		return "";
 	}
@@ -163,6 +233,17 @@ export class RpcClient extends EventEmitter {
 		this.emitStatus({ state: "starting" });
 
 		const { nodePath, cliPath } = this.config;
+		// 解析链兜底失败时给出可操作的提示,而不是 spawn 报晦涩错误
+		if (!nodePath) {
+			const detail = "未找到 Node.js。请在设置面板的\"环境检测\"中配置 Node 路径,或安装 Node.js(nodejs.org)";
+			this.emitStatus({ state: "crashed", detail });
+			throw new Error("nodePath 为空");
+		}
+		if (!cliPath) {
+			const detail = "未找到 pi CLI。请在设置面板的\"环境检测\"中配置 pi 路径";
+			this.emitStatus({ state: "crashed", detail });
+			throw new Error("cliPath 为空");
+		}
 		let proc: ChildProcess;
 		try {
 			proc = spawn(nodePath, [cliPath, "--mode", "rpc"], {
