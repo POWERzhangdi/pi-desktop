@@ -1,0 +1,330 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 语义色 → CSS 变量(运行时切换深浅色) */
+@theme inline {
+	--color-ground: var(--ground);
+	--color-side: var(--side);
+	--color-card: var(--card);
+	--color-txt: var(--txt);
+	--color-txt2: var(--txt2);
+	--color-sep: var(--sep);
+	--color-accent: var(--accent);
+	--color-accent-soft: var(--accent-soft);
+	--color-bubble: var(--bubble);
+	--color-purple: var(--purple);
+	--color-red: var(--red);
+	--color-orange: var(--orange);
+	--color-yellow: var(--yellow);
+	--color-green: var(--green);
+}
+
+/* Kimi 官方 token(浅色) */
+:root {
+	--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+	--ground: #f6f6f4;
+	--side: #ececea;
+	--card: #ffffff;
+	--txt: rgba(0, 0, 0, 0.9);
+	--txt2: rgba(0, 0, 0, 0.6);
+	--sep: rgba(0, 0, 0, 0.1);
+	--accent: #1783ff;
+	--accent-soft: #e8f3ff;
+	--bubble: #1783ff;
+	--purple: #985ffb;
+	--red: #ff3849;
+	--orange: #ff9500;
+	--yellow: #ffd230;
+	--green: #16c456;
+}
+
+/* Kimi 官方 token(深色) */
+.dark {
+	--ground: #1b1b1d;
+	--side: #131316;
+	--card: #2a2a2d;
+	--txt: rgba(255, 255, 255, 0.84);
+	--txt2: rgba(255, 255, 255, 0.56);
+	--sep: rgba(255, 255, 255, 0.1);
+	--accent: #1a88ff;
+	--accent-soft: #1e2a38;
+	--bubble: #292929;
+	--purple: #a16bff;
+	--red: #ff3849;
+	--orange: #ff9500;
+	--yellow: #ffd230;
+	--green: #16c456;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+}
+
+body {
+	font-family:
+		-apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+	font-size: 14px;
+}
+
+/* ---------------- Markdown 排版 ---------------- */
+
+.md-body {
+	line-height: 1.75;
+	word-break: break-word;
+}
+.md-body > *:first-child {
+	margin-top: 0;
+}
+.md-body > *:last-child {
+	margin-bottom: 0;
+}
+.md-body p {
+	margin: 0.55em 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+	font-weight: 600;
+	margin: 1em 0 0.5em;
+	line-height: 1.4;
+}
+.md-body h1 {
+	font-size: 1.35em;
+}
+.md-body h2 {
+	font-size: 1.2em;
+}
+.md-body h3 {
+	font-size: 1.1em;
+}
+.md-body ul,
+.md-body ol {
+	margin: 0.55em 0;
+	padding-left: 1.6em;
+}
+.md-body ul {
+	list-style: disc;
+}
+.md-body ol {
+	list-style: decimal;
+}
+.md-body li {
+	margin: 0.25em 0;
+}
+.md-body a {
+	color: var(--accent);
+	text-decoration: underline;
+}
+.md-body blockquote {
+	border-left: 3px solid var(--sep);
+	padding-left: 0.9em;
+	margin: 0.7em 0;
+	color: var(--txt2);
+}
+.md-body hr {
+	border: none;
+	border-top: 1px solid var(--sep);
+	margin: 1em 0;
+}
+.md-body code {
+	font-family: ui-monospace, Consolas, "Cascadia Mono", monospace;
+}
+.md-body :not(pre) > code {
+	background: var(--accent-soft);
+	padding: 0.12em 0.38em;
+	border-radius: 0.3em;
+	font-size: 0.86em;
+}
+.md-body pre {
+	background: #232326;
+	color: #e8e8e8;
+	border-radius: 0.6rem;
+	padding: 0.8rem 1rem;
+	overflow-x: auto;
+	margin: 0.75em 0;
+	font-size: 0.85rem;
+	line-height: 1.6;
+}
+.md-body pre code {
+	background: transparent;
+	padding: 0;
+}
+.md-body table {
+	border-collapse: collapse;
+	margin: 0.75em 0;
+	font-size: 0.92em;
+}
+.md-body th,
+.md-body td {
+	border: 1px solid var(--sep);
+	padding: 0.35em 0.8em;
+}
+.md-body th {
+	background: var(--side);
+	font-weight: 600;
+}
+
+/* highlight.js 极简配色(配合深色代码块底) */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-built_in {
+	color: #c792ea;
+}
+.hljs-string,
+.hljs-attr,
+.hljs-template-string {
+	color: #c3e88d;
+}
+.hljs-number,
+.hljs-literal {
+	color: #f78c6c;
+}
+.hljs-comment {
+	color: #7f7f7f;
+	font-style: italic;
+}
+.hljs-title,
+.hljs-function {
+	color: #82aaff;
+}
+.hljs-name,
+.hljs-tag {
+	color: #f07178;
+}
+
+/* 按钮按压反馈 + 过渡(统一 ease-out,150ms) */
+.btn-press {
+	transition: transform 150ms var(--ease-out), background-color 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+.btn-press:active {
+	transform: scale(0.97);
+}
+
+/* ---- 入场动画(@starting-style,无需 JS) ---- */
+/* Toast:从上方滑入 */
+.animate-toast {
+	opacity: 1;
+	transform: translateY(0);
+	transition: opacity 300ms var(--ease-out), transform 300ms var(--ease-out);
+	@starting-style {
+		opacity: 0;
+		transform: translateY(-12px);
+	}
+}
+/* Modal:居中缩放淡入(modal 保持 center origin) */
+.animate-modal {
+	opacity: 1;
+	transform: scale(1);
+	transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+	@starting-style {
+		opacity: 0;
+		transform: scale(0.95);
+	}
+}
+/* 全屏页:仅透明度淡入淡出,不用位移——冻结/节流状态下也不会产生布局偏移 */
+.animate-page {
+	animation: page-in 180ms var(--ease-out);
+}
+@keyframes page-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+.page-exit {
+	opacity: 0;
+	transition: opacity 150ms var(--ease-out);
+}
+/* Popover:从 trigger 缩放淡入(origin 由 --transform-origin 控制) */
+.animate-popover {
+	opacity: 1;
+	transform: scale(1);
+	transform-origin: var(--transform-origin, "top left");
+	transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+	@starting-style {
+		opacity: 0;
+		transform: scale(0.95);
+	}
+}
+/* 列表项:轻微上移淡入 */
+.animate-list {
+	opacity: 1;
+	transform: translateY(0);
+	transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+	@starting-style {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+}
+
+/* 无障碍:减少动效(去掉位移/缩放,保留淡入;停止持续动画) */
+@media (prefers-reduced-motion: reduce) {
+	.btn-press:active {
+		transform: none;
+	}
+	.animate-toast,
+	.animate-modal,
+	.animate-page,
+	.page-exit,
+	.animate-popover,
+	.animate-list {
+		transition: opacity 150ms ease;
+		transform: none;
+		@starting-style {
+			opacity: 0;
+			transform: none;
+		}
+	}
+	.animate-page {
+		animation: none;
+	}
+	.pi-dot,
+	.animate-pulse,
+	.animate-ping {
+		animation: none;
+	}
+}
+
+/* ---------------- 滚动条 ---------------- */
+
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+	background: var(--sep);
+	border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--txt2);
+}
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* 流式指示动画 */
+@keyframes pi-blink {
+	0%,
+	80%,
+	100% {
+		opacity: 0.25;
+	}
+	40% {
+		opacity: 1;
+	}
+}
+.pi-dot {
+	animation: pi-blink 1.2s infinite ease-in-out;
+}
+.pi-dot:nth-child(2) {
+	animation-delay: 0.15s;
+}
+.pi-dot:nth-child(3) {
+	animation-delay: 0.3s;
+}

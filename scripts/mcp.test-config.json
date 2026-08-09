@@ -1,0 +1,12 @@
+{
+	"servers": [
+		{
+			"id": "test",
+			"name": "测试 MCP",
+			"transport": "stdio",
+			"command": "node",
+			"args": ["C:/path/to/pi-desktop/scripts/mcp-test-server.mjs"],
+			"enabled": true
+		}
+	]
+}

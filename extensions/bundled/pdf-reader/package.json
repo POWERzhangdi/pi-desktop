@@ -1,0 +1,11 @@
+{
+  "name": "pi-ext-pdf-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "pi extension: read_pdf tool (text + embedded-image extraction). typebox/@earendil-works/pi-coding-agent provided by pi runtime.",
+  "dependencies": {
+    "unpdf": "^1.8.0",
+    "pngjs": "^7.0.0"
+  }
+}

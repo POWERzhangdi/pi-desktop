@@ -1,0 +1,45 @@
+{
+	"name": "pi-desktop",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Visual desktop client for the pi coding agent (Electron + React, Kimi theme)",
+	"type": "module",
+	"main": "out/main/index.js",
+	"scripts": {
+		"dev": "electron-vite dev",
+		"start": "electron-vite preview",
+		"typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+		"build": "npm run typecheck && electron-vite build",
+		"dist": "npm run typecheck && electron-vite build && electron-builder",
+		"dist:mac": "npm run typecheck && electron-vite build && electron-builder --mac",
+		"dist:win": "npm run typecheck && electron-vite build && electron-builder --win",
+		"smoke": "node scripts/smoke-rpc.mjs",
+		"smoke:mcp": "node scripts/probe-mcp.mjs",
+		"test:mcp": "node scripts/test-mcp.mjs",
+		"test:provider": "node scripts/test-provider.mjs",
+		"test:plugins": "node scripts/test-plugins.mjs"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "^0.84.1",
+		"diff": "^8.0.2",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"react-markdown": "^9.0.3",
+		"rehype-highlight": "^7.0.1",
+		"remark-gfm": "^4.0.0",
+		"zustand": "^5.0.2"
+	},
+	"devDependencies": {
+		"@tailwindcss/vite": "^4.1.11",
+		"@types/node": "^24.0.0",
+		"@types/react": "^18.3.18",
+		"@types/react-dom": "^18.3.5",
+		"@vitejs/plugin-react": "^5.0.0",
+		"electron": "^37.2.0",
+		"electron-builder": "^26.15.3",
+		"electron-vite": "^4.0.0",
+		"tailwindcss": "^4.1.11",
+		"typescript": "^5.8.3",
+		"vite": "^7.0.0"
+	}
+}

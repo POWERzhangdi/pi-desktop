@@ -1,0 +1,10 @@
+{
+  "name": "pi-ext-excel-reader",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "pi extension: read_excel tool (xlsx/csv parsing via exceljs). typebox/@earendil-works/pi-coding-agent provided by pi runtime.",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}

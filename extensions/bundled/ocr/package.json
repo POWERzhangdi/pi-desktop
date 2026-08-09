@@ -1,0 +1,10 @@
+{
+  "name": "pi-ext-ocr",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "pi extension: ocr + view_image tools. typebox/@earendil-works/pi-coding-agent provided by pi runtime.",
+  "dependencies": {
+    "tesseract.js": "^6.0.1"
+  }
+}

@@ -1,0 +1,30 @@
+appId: com.pi-desktop.app
+productName: pi-desktop
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+extraResources:
+  # MCP 扩展源(主进程启动时部署到 ~/.pi/agent/extensions/mcp)
+  - from: extensions
+    to: extensions
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
