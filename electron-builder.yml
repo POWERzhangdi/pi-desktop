@@ -5,12 +5,22 @@ directories:
 files:
   - out/**
   - package.json
+  # 内置 pi 不随 asar 打包(它要被外部 node 子进程执行),改由 build/runtime 载荷提供
+  - "!node_modules/**"
 extraResources:
-  # MCP 扩展源(主进程启动时部署到 ~/.pi/agent/extensions/mcp)
+  # 内置 pi 运行时载荷(单个 tar):首次启动解到 ~/.pi-desktop/runtime/pi/<version>/
+  # 用文件而不是目录,是因为 files 里的 "!node_modules/**" 会把目录形式的
+  # extraResources/node_modules 一起过滤掉。
+  - from: build/runtime.tar
+    to: runtime.tar
+  - from: build/runtime.manifest.json
+    to: runtime.manifest.json
+  # MCP / 内置扩展源(主进程启动时部署到 ~/.pi/agent/extensions)
   - from: extensions
     to: extensions
 mac:
   category: public.app-category.developer-tools
+  icon: build/icon.png
   target:
     - target: dmg
       arch:
@@ -21,6 +31,7 @@ mac:
         - arm64
         - x64
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch:

@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    # 项目以 Windows 为主开发平台;Linux/macOS 的路径逻辑由单元测试覆盖
+    runs-on: windows-latest
+    env:
+      # CI 不需要真正下载 Electron 二进制(构建产物由本地/发布流水线打)
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit + backend tests
+        run: npm test
+      - name: Build (main/preload/renderer)
+        run: npm run build

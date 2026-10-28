@@ -6,16 +6,13 @@
  * 用法:node scripts/test-mcp.mjs
  * 退出码:0 通过,1 失败。
  */
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { piRoot } from "./lib/pi.mjs";
 
-const require = createRequire(import.meta.url);
-const piRoot =
-	process.env.PI_DESKTOP_CLI_ROOT ||
-	join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@earendil-works", "pi-coding-agent");
+
 const jitiPath = join(piRoot, "node_modules", "jiti", "lib", "jiti.mjs");
 const { createJiti } = await import(pathToFileURL(jitiPath).href);
 const jiti = createJiti(import.meta.url, {});

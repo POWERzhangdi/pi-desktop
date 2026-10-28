@@ -28,5 +28,10 @@ npm-debug.log*
 # Electron builder
 release/
 
+# 内置 pi 运行时载荷(build/runtime 由 npm run build:runtime 生成;icon.png 要保留)
+build/runtime.tar
+build/runtime.manifest.json
+build/runtime-staging/
+
 # Misc
 *.tsbuildinfo

@@ -3,15 +3,13 @@
  * 同步/幂等/用户改动保留/客户端升级覆盖/源删除清理/清单生成。
  * 用法:node scripts/test-plugins.mjs
  */
-import { createRequire } from "node:module";
+
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
+import { piRoot } from "./lib/pi.mjs";
 
-const piRoot =
-	process.env.PI_DESKTOP_CLI_ROOT ||
-	join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@earendil-works", "pi-coding-agent");
 const jitiPath = join(piRoot, "node_modules", "jiti", "lib", "jiti.mjs");
 const { createJiti } = await import(pathToFileURL(jitiPath).href);
 const jiti = createJiti(import.meta.url, {});

@@ -41,7 +41,6 @@ async function evalJs(expression) {
 	}
 	return r.result?.result?.value;
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 if (OPEN) {
 	// 点状态栏第一个按钮(模型选择器) → 点「管理模型」

@@ -12,11 +12,8 @@
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { homedir } from "node:os";
+import { piRoot } from "./lib/pi.mjs";
 
-const piRoot =
-	process.env.PI_DESKTOP_CLI_ROOT ||
-	join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@earendil-works", "pi-coding-agent");
 const jitiPath = join(piRoot, "node_modules", "jiti", "lib", "jiti.mjs");
 const { createJiti } = await import(pathToFileURL(jitiPath).href);
 const jiti = createJiti(import.meta.url, {});

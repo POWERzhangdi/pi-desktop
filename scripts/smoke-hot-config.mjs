@@ -16,18 +16,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { cliPath } from "./lib/pi.mjs";
 
-const cliPath = join(
-	homedir(),
-	"AppData",
-	"Roaming",
-	"npm",
-	"node_modules",
-	"@earendil-works",
-	"pi-coding-agent",
-	"dist",
-	"cli.js",
-);
 const agentDir = join(homedir(), ".pi", "agent");
 const authPath = join(agentDir, "auth.json");
 const modelsPath = join(agentDir, "models.json");

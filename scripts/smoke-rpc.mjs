@@ -9,14 +9,13 @@
  */
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { homedir } from "node:os";
-import { join } from "node:path";
+
+import { cliPath, assertPi } from "./lib/pi.mjs";
+
+assertPi();
 
 const TOTAL_TIMEOUT_MS = 120_000;
 
-const cliPath =
-	process.env.PI_DESKTOP_CLI ||
-	join(homedir(), "AppData", "Roaming", "npm", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
 const cwd = process.cwd(); // npm run 时即项目目录(Windows 路径)
 
 let proc;
