@@ -37,6 +37,7 @@ function hash8(s: string): string {
 }
 function sanitize(name: string): string {
   const base = basename(name).replace(/\.[^.]+$/, "");
+  // eslint-disable-next-line no-control-regex -- 需要清理文件名里的控制字符
   return base.replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").slice(0, 40) || "excel";
 }
 function sessionIdOf(ctx: any): string {

@@ -1,23 +1,30 @@
 /**
- * RpcClientPool:按 cwd 管理一组 pi RPC 进程(懒启动、保持存活)。
+ * RpcClientPool:按 cwd 管理一组 pi RPC 进程(懒启动、保持存活、空闲回收)。
  * 每个 workspace 一个进程,事件/状态转发时包上 cwd 信封。
  */
 import { EventEmitter } from "node:events";
 import { RpcClient, resolveConfig } from "./client";
 import type { PiConfig, RpcEventEnvelope, BackendStatusEnvelope } from "../../shared/ipc";
 
-export class RpcClientPool extends EventEmitter {
-	readonly config: PiConfig;
-	private clients = new Map<string, RpcClient>();
+/** 默认空闲回收阈值:10 分钟无活动且不在执行中则关闭(下次使用时懒启动) */
+const DEFAULT_IDLE_MS = 10 * 60_000;
+/** 巡检间隔 */
+const SWEEP_INTERVAL_MS = 60_000;
 
-	constructor(config?: PiConfig) {
+export class RpcClientPool extends EventEmitter {
+	/** 当前解析出的运行配置(配置写入后通过 reloadConfig 换成新对象) */
+	config: PiConfig;
+	private clients = new Map<string, RpcClient>();
+	private readonly idleMs: number;
+	private sweeper: NodeJS.Timeout;
+
+	constructor(config?: PiConfig, opts: { idleMs?: number } = {}) {
 		super();
 		this.config = config ?? resolveConfig();
-	}
-
-	/** 是否已有该 cwd 的进程(不含已退出的) */
-	has(cwd: string): boolean {
-		return this.clients.has(cwd);
+		this.idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
+		this.sweeper = setInterval(() => this.reapIdle(), SWEEP_INTERVAL_MS);
+		// 不阻止进程退出(测试/CLI 场景尤其重要)
+		this.sweeper.unref?.();
 	}
 
 	/**
@@ -65,13 +72,24 @@ export class RpcClientPool extends EventEmitter {
 
 	/** 重新读取配置文件并更新(配置写入后;改了 cliPath/nodePath 需再 restartAll) */
 	reloadConfig(): void {
-		(this as { config: PiConfig }).config = resolveConfig();
+		this.config = resolveConfig();
 	}
 
 	/** 关闭全部进程(应用退出时) */
 	disposeAll(): void {
+		clearInterval(this.sweeper);
 		for (const client of this.clients.values()) client.dispose();
 		this.clients.clear();
 		this.removeAllListeners();
+	}
+
+	/** 回收空闲进程:不在执行中、无挂起命令、超过阈值没活动 */
+	private reapIdle(): void {
+		for (const [cwd, client] of this.clients) {
+			if (client.isBusy || client.pendingCount > 0) continue;
+			if (client.idleMs < this.idleMs) continue;
+			this.clients.delete(cwd);
+			client.dispose();
+		}
 	}
 }

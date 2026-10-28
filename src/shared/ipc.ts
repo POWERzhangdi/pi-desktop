@@ -20,7 +20,6 @@ export const IpcChannels = {
 	providersRemoveKey: "providers:removeKey",
 	providersUpsertCustom: "providers:upsertCustom",
 	providersRemoveCustom: "providers:removeCustom",
-	providersGetKey: "providers:getKey",
 	providersTest: "providers:test",
 	mcpList: "mcp:list",
 	mcpUpsert: "mcp:upsert",
@@ -38,7 +37,32 @@ export const IpcChannels = {
 	configSet: "config:set",
 	sessionDelete: "session:delete",
 	sessionArchive: "session:archive",
+	/** 用系统浏览器打开外部链接(渲染进程不直接持有 shell) */
+	openExternal: "shell:openExternal",
+	/** 命令审批策略(主进程持有,渲染进程只读/改,不能绕过) */
+	approvalGet: "approval:get",
+	approvalSet: "approval:set",
+	approvalAutoTurn: "approval:autoTurn",
+	/** 应用菜单/快捷键触发的动作(主进程 → 渲染进程) */
+	appCommand: "app:command",
 } as const;
+
+/** 菜单与快捷键能触发的渲染端动作 */
+export type AppCommand =
+	| "session:new"
+	| "workspace:add"
+	| "settings:open"
+	| "models:open"
+	| "zoom:in"
+	| "zoom:out"
+	| "zoom:reset"
+	| "theme:toggle";
+
+/** 命令审批模式:full=完全访问(危险命令自动放行);approve=审批(弹框) */
+export type ApprovalMode = "full" | "approve";
+
+/** 命令审批 confirm 请求的标题(扩展侧硬编码,主进程据此识别审批请求) */
+export const APPROVAL_CONFIRM_TITLE = "命令审批";
 
 export interface SessionSummary {
 	filePath: string;
@@ -147,9 +171,12 @@ export interface ProviderTestRequest {
 	mode: "models" | "chat";
 	api: string;
 	baseUrl: string;
+	/** 用户本次输入的 key(可含 $ENV 引用);不传则回退到 auth.json / 环境变量 */
 	apiKey?: string;
 	/** 内置 provider 未填 key 时回退的环境变量名 */
 	envVar?: string;
+	/** 内置 provider id:未填 key 时由主进程从 auth.json 读取(明文不出主进程) */
+	providerId?: string;
 	/** chat 模式必填 */
 	model?: string;
 }
@@ -243,9 +270,8 @@ export interface PiApi {
 	upsertCustomProvider(provider: CustomProvider, originalId?: string): Promise<void>;
 	/** 删除 models.json 自定义 provider;保存后全部后端重启 */
 	removeCustomProvider(providerId: string): Promise<void>;
-	/** 读取内置 provider 的完整密钥(来自 auth.json);未配置返回 undefined */
-	getProviderKey(providerId: string): Promise<string | undefined>;
-	/** 测试模型连接(内置 provider 验 key+端点;自定义 provider 发最小对话验全链路) */
+	/** 测试模型连接(内置 provider 验 key+端点;自定义 provider 发最小对话验全链路)。
+	 *  key 不回传渲染进程:传 providerId 由主进程从 auth.json 取 */
 	testProviderConnection(req: ProviderTestRequest): Promise<ProviderTestResult>;
 	/** MCP 服务器列表(读 ~/.pi/agent/mcp.json;首次调用会确保扩展已部署) */
 	listMcpServers(): Promise<McpServerConfig[]>;
@@ -281,6 +307,16 @@ export interface PiApi {
 	sessionDelete(filePath: string): Promise<boolean>;
 	/** 归档会话(重命名加 .archived,移出列表) */
 	sessionArchive(filePath: string): Promise<boolean>;
+	/** 用系统默认浏览器打开 http(s) 链接(非 http(s) 协议直接忽略) */
+	openExternal(url: string): Promise<void>;
+	/** 读取各工作区的命令审批模式(主进程是唯一权威,默认 approve) */
+	getApprovalModes(): Promise<Record<string, ApprovalMode>>;
+	/** 设置某工作区的命令审批模式 */
+	setApprovalMode(cwd: string, mode: ApprovalMode): Promise<void>;
+	/** 本轮自动批准(下一轮 agent_start 自动复位) */
+	setAutoApproveTurn(cwd: string, on: boolean): Promise<void>;
+	/** 订阅应用菜单/快捷键动作,返回取消订阅函数 */
+	onAppCommand(cb: (cmd: AppCommand) => void): () => void;
 }
 
 declare global {

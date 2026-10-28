@@ -6,6 +6,8 @@
  * pi-desktop 客户端的 ExtensionUiDialog;用户拒绝则 block,批准则放行。
  *
  * 客户端侧按工作区模式决定:完全访问 -> 自动放行;审批 -> 弹框/本轮自动批准。
+ * 放行判定在主进程(src/main/approval.ts),靠这里的标题常量作为识别依据 ——
+ * 改动下面的 "命令审批" 必须同步 src/shared/ipc.ts 的 APPROVAL_CONFIRM_TITLE。
  *
  * 危险正则:默认覆盖常见破坏性命令;可用 ~/.pi-desktop/dangerous.txt 覆盖
  * (每行一个正则,# 开头注释;读取失败回退默认)。

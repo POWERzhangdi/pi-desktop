@@ -7,11 +7,12 @@
  *
  * pi 进程启动时由扩展读取 mcp.json,配置变更后必须重启全部后端进程(同 providers)。
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import type { McpServerConfig, McpTestResult } from "../shared/ipc";
 import { runNpmInstall } from "./proc";
+import { writeJsonAtomic } from "./util/json-file";
 
 interface McpConfigFile {
 	servers?: McpServerConfig[];
@@ -30,8 +31,8 @@ export class McpStore {
 	}
 
 	private write(file: McpConfigFile): void {
-		mkdirSync(dirname(this.mcpPath), { recursive: true });
-		writeFileSync(this.mcpPath, JSON.stringify(file, null, 2), "utf8");
+		// 原子写:pi 进程会在启动时读这份文件,不能让它读到半截 JSON
+		writeJsonAtomic(this.mcpPath, file);
 	}
 
 	listServers(): McpServerConfig[] {

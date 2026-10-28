@@ -4,7 +4,7 @@
  * - 自定义 provider 读写 ~/.pi/agent/models.json
  * pi 进程启动时缓存这两份配置(实测不热感知),所以任何变更后由调用方重启全部后端进程。
  */
-import { readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
 	CustomProvider,
@@ -14,6 +14,7 @@ import type {
 	ProviderTestResult,
 } from "../shared/ipc";
 import type { PiConfig } from "../shared/ipc";
+import { writeJsonAtomic } from "./util/json-file";
 
 /**
  * 精选内置 provider 目录(id 即 auth.json/env 的 provider key)。
@@ -51,11 +52,12 @@ interface ModelsFile {
 }
 
 export class ProvidersStore {
-	private readonly agentDir: string;
+	/** 传 getter 而不是快照:config 变更后路径仍然正确 */
+	constructor(private readonly getConfig: () => PiConfig) {}
 
-	constructor(config: PiConfig) {
-		// sessionsDir 即 ~/.pi/agent/sessions,取其父目录
-		this.agentDir = dirname(config.sessionsDir);
+	/** sessionsDir 即 ~/.pi/agent/sessions,取其父目录 */
+	private get agentDir(): string {
+		return dirname(this.getConfig().sessionsDir);
 	}
 
 	private get authPath(): string {
@@ -75,12 +77,8 @@ export class ProvidersStore {
 	}
 
 	private writeAuth(auth: AuthFile): void {
-		writeFileSync(this.authPath, JSON.stringify(auth, null, 2));
-		try {
-			chmodSync(this.authPath, 0o600);
-		} catch {
-			/* Windows 上 chmod 可能失败,忽略 */
-		}
+		// 含密钥:0600 + 原子写(Windows 上 mode 可能被忽略,不影响)
+		writeJsonAtomic(this.authPath, auth, { mode: 0o600 });
 	}
 
 	private readModelsFile(): ModelsFile {
@@ -92,7 +90,7 @@ export class ProvidersStore {
 	}
 
 	private writeModelsFile(file: ModelsFile): void {
-		writeFileSync(this.modelsPath, JSON.stringify(file, null, 2));
+		writeJsonAtomic(this.modelsPath, file);
 	}
 
 	private static mask(key: string): string {
@@ -186,7 +184,7 @@ export class ProvidersStore {
 		if (provider.models.length === 0) throw new Error("至少需要一个模型");
 
 		const file = this.readModelsFile();
-		const providers = { ...(file.providers ?? {}) };
+		const providers = { ...file.providers };
 		const targetId = originalId ?? id;
 		const existing = providers[targetId] ?? {};
 		if (originalId && originalId !== id) delete providers[originalId];
@@ -232,12 +230,20 @@ export class ProvidersStore {
 
 const TEST_TIMEOUT_MS = 15_000;
 
-/** 解析测试 key:$ENV 引用 / 明文 / 环境变量回退 */
-function resolveTestKey(req: ProviderTestRequest): string | undefined {
+/** 解析测试 key:本次输入(可 $ENV)> auth.json 已存 key > 环境变量回退 */
+function resolveTestKey(
+	req: ProviderTestRequest,
+	readStoredKey?: (providerId: string) => string | undefined,
+): string | undefined {
 	const raw = req.apiKey?.trim();
 	if (raw) {
 		if (raw.startsWith("$")) return process.env[raw.slice(1)];
 		return raw;
+	}
+	if (req.providerId && readStoredKey) {
+		// 明文 key 只留在主进程:渲染进程不传 key 时由这里补
+		const stored = readStoredKey(req.providerId);
+		if (stored) return stored;
 	}
 	if (req.envVar) return process.env[req.envVar];
 	return undefined;
@@ -251,10 +257,11 @@ function resolveTestKey(req: ProviderTestRequest): string | undefined {
  */
 export async function testProviderConnection(
 	req: ProviderTestRequest,
+	readStoredKey?: (providerId: string) => string | undefined,
 ): Promise<ProviderTestResult> {
 	const base = req.baseUrl.trim().replace(/\/+$/, "");
 	if (!base) return { ok: false, error: "baseUrl 为空" };
-	const key = resolveTestKey(req);
+	const key = resolveTestKey(req, readStoredKey);
 	const started = Date.now();
 
 	try {

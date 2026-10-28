@@ -1,7 +1,8 @@
 /**
  * 工作区文件扫描(供输入框 @ 引用补全)。
- * 递归扫描 cwd(限深 3 层,排除 node_modules/.git/dist 等常见忽略目录与隐藏目录),
- * 模糊匹配 query(子串忽略大小写,匹配文件名或绝对路径),返回 ≤50 条,带 10s 缓存避免每次击键扫描。
+ * 递归扫描 cwd(限深 12 层,排除 node_modules/.git/dist 等常见忽略目录与隐藏目录),
+ * 模糊匹配 query(字符按序命中,连续/词首加分),返回 ≤50 条;
+ * 全量索引带 60s 缓存,避免每次击键扫描。
  */
 import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -12,6 +13,7 @@ const EXCLUDE = new Set([
 	".git",
 	"dist",
 	"build",
+	"release",
 	".next",
 	"out",
 	".cache",
@@ -29,6 +31,11 @@ const EXCLUDE = new Set([
 	".settings",
 	"__pycache__",
 	".pytest_cache",
+	".venv",
+	"venv",
+	"vendor",
+	"tmp",
+	".dsh",
 ]);
 const MAX_DEPTH = 12;
 const MAX_RESULTS = 50;
@@ -38,7 +45,7 @@ const CACHE_MS = 60_000;
 const cache = new Map<string, { files: FileEntry[]; ts: number }>();
 
 /** 模糊匹配分数:query 字符按顺序在 target 中出现则返回正分(连续/词首加分),否则 -1 */
-function fuzzyScore(query: string, target: string): number {
+export function fuzzyScore(query: string, target: string): number {
 	const q = query.toLowerCase();
 	const t = target.toLowerCase();
 	let qi = 0;
@@ -112,7 +119,8 @@ async function scanTop(cwd: string): Promise<FileEntry[]> {
 }
 
 export async function listFiles(cwd: string, query: string): Promise<FileEntry[]> {
-	const q = query.trim().toLowerCase();
+	// 用户看到的是 src/main 这种正斜杠相对路径,输入的也可能是 /:匹配前统一成 /
+	const q = query.trim().toLowerCase().replace(/\\/g, "/");
 	const cached = cache.get(cwd);
 	const fresh = cached && Date.now() - cached.ts < CACHE_MS;
 	if (!q) {
@@ -130,7 +138,7 @@ export async function listFiles(cwd: string, query: string): Promise<FileEntry[]
 	const matched = files
 		.map((f) => {
 			const ns = fuzzyScore(q, f.name);
-			const ps = ns >= 0 ? -1 : fuzzyScore(q, f.path);
+			const ps = ns >= 0 ? -1 : fuzzyScore(q, f.path.toLowerCase().replace(/\\/g, "/"));
 			return { f, score: ns >= 0 ? ns + 10000 : ps };
 		})
 		.filter((m) => m.score >= 0)
@@ -145,11 +153,20 @@ export async function listFiles(cwd: string, query: string): Promise<FileEntry[]
 	return matched.slice(0, MAX_RESULTS);
 }
 
-/** 预热缓存(工作区激活时后台调,@ 时直接命中) */
-export async function warmCache(cwd: string): Promise<void> {
+/** 预热缓存(工作区激活时后台调,@ 时直接命中);并发调用复用同一次扫描 */
+const warming = new Map<string, Promise<void>>();
+
+export function warmCache(cwd: string): Promise<void> {
 	const now = Date.now();
 	const cached = cache.get(cwd);
-	if (cached && now - cached.ts < CACHE_MS) return;
-	const files = await scanAll(cwd);
-	cache.set(cwd, { files, ts: now });
+	if (cached && now - cached.ts < CACHE_MS) return Promise.resolve();
+	const running = warming.get(cwd);
+	if (running) return running;
+	const task = scanAll(cwd)
+		.then((files) => {
+			cache.set(cwd, { files, ts: Date.now() });
+		})
+		.finally(() => warming.delete(cwd));
+	warming.set(cwd, task);
+	return task;
 }

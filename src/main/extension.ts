@@ -46,14 +46,38 @@ async function loadTool(cliPath: string, extName: string, toolName: string): Pro
 	return p;
 }
 
+/**
+ * 调扩展工具的 execute。
+ *
+ * pi 的 ToolDefinition.execute 签名是 (toolCallId, params, signal, onUpdate, ctx);
+ * 这里按函数 arity 适配而不是写死 5 参 —— 上游一旦调整参数个数,
+ * 写死的调用会把 ctx 塞进 onUpdate 之类的槽位,静默失效且很难排查。
+ */
+function callToolExecute(
+	tool: { execute: (...args: never[]) => unknown },
+	params: Record<string, unknown>,
+	ctx: Record<string, unknown>,
+): Promise<{ content?: Array<{ text?: string }> }> {
+	const fn = tool.execute as unknown as (...args: unknown[]) => Promise<{ content?: Array<{ text?: string }> }>;
+	const arity = fn.length;
+	if (arity >= 5) return fn("desktop", params, undefined, undefined, ctx);
+	if (arity === 4) return fn("desktop", params, undefined, ctx);
+	if (arity === 3) return fn("desktop", params, ctx);
+	return fn("desktop", params, undefined, undefined, ctx);
+}
+
 async function execTool(
 	cliPath: string, extName: string, toolName: string,
 	params: Record<string, unknown>, cwd: string,
 ): Promise<string> {
 	const tool = await loadTool(cliPath, extName, toolName);
 	const ctx = { cwd, sessionManager: { getSessionId: () => "desktop" } };
-	const result = await tool.execute("desktop", params, undefined, undefined, ctx);
-	return result?.content?.[0]?.text ?? "";
+	const result = await callToolExecute(tool, params, ctx);
+	// 结果可能是多个 text 块,全部拼回来(只取第一块会丢内容)
+	return (result?.content ?? [])
+		.map((b) => (typeof b?.text === "string" ? b.text : ""))
+		.join("")
+		.trim();
 }
 
 async function pickAndExec(
