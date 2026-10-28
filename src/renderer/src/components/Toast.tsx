@@ -19,11 +19,10 @@ export default function ToastStack() {
 	const setActive = useSessionStore((s) => s.setActive);
 
 	return (
-		<div className="fixed top-4 right-4 z-50 space-y-2 w-80">
+		<div className="fixed top-4 right-4 z-50 space-y-2 w-80" role="status" aria-live="polite">
 			{toasts.map((t) => (
 			<div
 				key={t.id}
-				onMouseEnter={() => dismiss(t.id)}
 				className={`animate-toast bg-card border-l-4 ${kindClass[t.kind]} border border-sep rounded-lg shadow-lg px-3 py-2 text-sm flex items-start gap-2`}
 			>
 					<span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${dotClass[t.kind]}`} />

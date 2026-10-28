@@ -4,20 +4,10 @@
  */
 import { useEffect, useState } from "react";
 import { useMcpStore } from "../store/useMcpStore";
+import { confirmAction } from "../store/confirm";
 import type { McpServerConfig, McpTestResult } from "../../../shared/ipc";
 
-const inputCls =
-	"w-full bg-ground border border-sep rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-accent placeholder:text-txt2/60";
-const labelCls = "block text-xs text-txt2 mb-1";
-
-function Spinner() {
-	return (
-		<svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none">
-			<circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-			<path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-		</svg>
-	);
-}
+import { Spinner, inputCls, labelCls } from "./ui";
 
 /* ---------------- 表单 ---------------- */
 
@@ -406,10 +396,14 @@ function ServerCard({
 
 	const toggleEnabled = () => void save({ ...server, enabled: !server.enabled }, server.id);
 
-	const doRemove = () => {
-		if (window.confirm(`删除 MCP 服务器「${server.name}」?保存后重启全部后端。`)) {
-			void remove(server.id);
-		}
+	const doRemove = async () => {
+		const ok = await confirmAction({
+			title: `删除 MCP 服务器「${server.name}」?`,
+			message: "删除后会重启全部后端,该服务器提供的工具将立即不可用。",
+			confirmText: "删除",
+			danger: true,
+		});
+		if (ok) await remove(server.id);
 	};
 
 	return (
@@ -464,7 +458,7 @@ function ServerCard({
 					<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
 				</button>
 				<button
-					onClick={doRemove}
+					onClick={() => void doRemove()}
 					title="删除"
 					className="btn-press shrink-0 w-6 h-6 flex items-center justify-center text-txt2 hover:text-red"
 				>

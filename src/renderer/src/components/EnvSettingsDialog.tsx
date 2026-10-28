@@ -5,11 +5,14 @@
  * - OCR 引擎:tesseract(默认,纯 JS) / RapidOCR(强,需 Python+包);RapidOCR 未就绪时傻瓜式引导安装
  * Python 缺失给 winget 安装指引;rapidocr 未装提供"一键安装"按钮,点击弹出终端风格进度弹窗(逐行日志 + 闪烁光标)。
  */
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/useSessionStore";
+import { confirmRestartIfBusy } from "../store/busy";
+import Modal from "./Modal";
 import type { EnvInfo, PiConfig, RuntimeSource } from "../../../shared/ipc";
-import McpManagerPanel from "./McpManagerPanel";
+
+/** MCP 面板按需加载(低频 tab) */
+const McpManagerPanel = lazy(() => import("./McpManagerPanel"));
 
 const SOURCE_LABEL: Record<RuntimeSource, string> = {
 	env: "环境变量",
@@ -70,9 +73,9 @@ function EnvRow({
 						</span>
 					)}
 					{ok ? (
-						<span className="text-[10px] text-green">✓ 就绪</span>
+						<span className="text-[10px] text-ok">✓ 就绪</span>
 					) : (
-						<span className="text-[10px] text-orange">未检测到</span>
+						<span className="text-[10px] text-warn">未检测到</span>
 					)}
 					{onSave && !editing && (
 						<button
@@ -143,6 +146,7 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 	const ocrEngine = useSessionStore((s) => s.ocrEngine);
 	const setOcrEngine = useSessionStore((s) => s.setOcrEngine);
 	const pushToast = useSessionStore((s) => s.pushToast);
+	const setModelManagerOpen = useSessionStore((s) => s.setModelManagerOpen);
 	const isMac = window.piApi.platform === "darwin";
 
 	const refresh = async () => {
@@ -201,6 +205,8 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 	};
 
 	const savePath = async (key: "cliPath" | "nodePath" | "pythonPath", val: string) => {
+		// 改 pi/Node 路径会重启全部后端(中断正在跑的任务),与模型/MCP 保存保持一致先确认
+		if (key !== "pythonPath" && !(await confirmRestartIfBusy("保存路径"))) return;
 		await window.piApi.configSet({ [key]: val } as Partial<PiConfig>);
 		pushToast(
 			`${key === "cliPath" ? "pi" : key === "nodePath" ? "Node" : "Python"} 路径已保存${key !== "pythonPath" ? ",重启后端生效" : ""}`,
@@ -211,6 +217,7 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 
 	/** 恢复自动:清空手动配置,回到自动检测/内置兜底链 */
 	const resetPath = async (key: "cliPath" | "nodePath") => {
+		if (!(await confirmRestartIfBusy("恢复自动检测"))) return;
 		await window.piApi.configSet({ [key]: "" } as Partial<PiConfig>);
 		pushToast(`${key === "cliPath" ? "pi" : "Node"} 已恢复自动检测`, "info");
 		await refresh();
@@ -222,12 +229,9 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 	const rapidOk = env?.rapidocr ?? false;
 	const canRapid = pyOk && rapidOk;
 
-	return createPortal(
-		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-			<div
-				className="animate-modal w-[600px] h-[480px] flex bg-card border border-sep rounded-2xl shadow-xl overflow-hidden"
-				onClick={(e) => e.stopPropagation()}
-			>
+	return (
+		<>
+			<Modal open onClose={onClose} labelledBy="settings-title" className="w-[600px] h-[480px] flex overflow-hidden">
 				{/* 左侧导航 */}
 				<div className="w-40 shrink-0 bg-side border-r border-sep flex flex-col py-3">
 					<div className="px-3 pb-2 mb-1 text-[11px] font-medium text-txt2">设置</div>
@@ -248,12 +252,24 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 							{item.label}
 						</button>
 					))}
+					<div className="flex-1" />
+					{/* 模型/密钥在另一个全屏页,这里给一个明确入口(用户会先来设置里找) */}
+					<button
+						onClick={() => {
+							onClose();
+							setModelManagerOpen(true);
+						}}
+						className="text-left px-3 py-2 text-sm border-l-2 border-transparent text-txt2 hover:text-accent flex items-center gap-1"
+					>
+						模型与密钥
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+					</button>
 				</div>
 
 				{/* 右侧内容 */}
 				<div className="flex-1 flex flex-col min-w-0">
 					<div className="flex items-center justify-between px-5 py-3.5 border-b border-sep">
-						<h2 className="text-sm font-semibold">
+						<h2 id="settings-title" className="text-sm font-semibold">
 							{tab === "env" ? "环境检测" : tab === "ocr" ? "OCR 引擎" : "MCP 服务器"}
 						</h2>
 						<button
@@ -396,65 +412,72 @@ export default function EnvSettingsDialog({ open, onClose }: { open: boolean; on
 							</div>
 						)}
 
-						{tab === "mcp" && <McpManagerPanel />}
+						{tab === "mcp" && (
+							<Suspense fallback={<div className="text-xs text-txt2 py-3">加载中…</div>}>
+								<McpManagerPanel />
+							</Suspense>
+						)}
 					</div>
 				</div>
+			</Modal>
 
-				{/* 安装进度弹窗(终端风格,覆盖在设置面板之上) */}
-				{installOpen && (
-					<div
-						className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
-						onClick={(e) => {
-							e.stopPropagation();
-							if (!installing) closeInstall();
-						}}
-					>
-						<div className="animate-modal w-[560px] rounded-xl overflow-hidden shadow-2xl border border-sep bg-card">
-							{/* 终端标题栏:红黄绿圆点 + 标题 */}
-							<div className="flex items-center gap-2 px-4 py-2.5 bg-side border-b border-sep">
-								<span className="w-3 h-3 rounded-full bg-red" />
-								<span className="w-3 h-3 rounded-full bg-orange" />
-								<span className="w-3 h-3 rounded-full bg-green" />
-								<span className="ml-2 text-xs text-txt2 font-mono">rapidocr-install — bash</span>
-							</div>
-							{/* 终端主体:黑底 monospace,逐行日志 + 闪烁光标 */}
-							<div
-								ref={termRef}
-								className="bg-[#0d1117] p-4 h-72 overflow-auto font-mono text-[12px] leading-relaxed"
-							>
-								<div className="text-green">$ python -m pip install rapidocr-onnxruntime</div>
-								{installLog.map((line, i) => (
-									<div key={i} className="text-txt2/80 whitespace-pre-wrap break-all">
-										{line}
-									</div>
-								))}
-								{installing && <div className="text-green animate-pulse">▋</div>}
-								{installDone === "ok" && <div className="text-green mt-1">✓ 安装完成</div>}
-								{installDone === "error" && <div className="text-red mt-1">✗ 安装失败,见上方日志</div>}
-							</div>
-							{/* 底栏:状态 + 关闭按钮 */}
-							<div className="flex items-center justify-between px-4 py-2.5 border-t border-sep">
-								<span className="text-xs text-txt2">
-									{installing
-										? "正在安装…(约 1-2 分钟,下载约 100MB)"
-										: installDone === "ok"
-											? "RapidOCR 已就绪,可切换引擎"
-											: "安装失败,请检查日志"}
-								</span>
-								{!installing && (
-									<button
-										onClick={closeInstall}
-										className="text-xs bg-accent text-white rounded-lg px-3 py-1.5 hover:opacity-90"
-									>
-										关闭
-									</button>
-								)}
-							</div>
-						</div>
+			{/* 安装进度(独立 Modal:主面板带 transform/overflow,内嵌 fixed 层会被裁剪) */}
+			{installOpen && (
+				<Modal
+					open
+					onClose={() => {
+						if (!installing) closeInstall();
+					}}
+					closeOnBackdrop={!installing}
+					closeOnEsc={!installing}
+					labelledBy="ocr-install-title"
+					className="w-[560px] overflow-hidden"
+				>
+					{/* 终端标题栏:红黄绿圆点 + 标题 */}
+					<div className="flex items-center gap-2 px-4 py-2.5 bg-side border-b border-sep">
+						<span className="w-3 h-3 rounded-full bg-red" />
+						<span className="w-3 h-3 rounded-full bg-orange" />
+						<span className="w-3 h-3 rounded-full bg-green" />
+						<span id="ocr-install-title" className="ml-2 text-xs text-txt2 font-mono">
+							rapidocr-install — bash
+						</span>
 					</div>
-				)}
-				</div>
-			</div>,
-			document.body,
-		);
+					{/* 终端主体:黑底 monospace,逐行日志 + 闪烁光标 */}
+					<div
+						ref={termRef}
+						className="bg-[#0d1117] p-4 h-72 overflow-auto font-mono text-[12px] leading-relaxed"
+					>
+						<div className="text-green">$ python -m pip install rapidocr-onnxruntime</div>
+						{installLog.map((line, i) => (
+							<div key={i} className="text-txt2/80 whitespace-pre-wrap break-all">
+								{line}
+							</div>
+						))}
+						{installing && <div className="text-green animate-pulse">▋</div>}
+						{installDone === "ok" && <div className="text-green mt-1">✓ 安装完成</div>}
+						{installDone === "error" && <div className="text-red mt-1">✗ 安装失败,见上方日志</div>}
+					</div>
+					{/* 底栏:状态 + 关闭按钮 */}
+					<div className="flex items-center justify-between px-4 py-2.5 border-t border-sep">
+						<span className="text-xs text-txt2">
+							{installing
+								? "正在安装…(约 1-2 分钟,下载约 100MB)"
+								: installDone === "ok"
+									? "RapidOCR 已就绪,可切换引擎"
+									: "安装失败,请检查日志"}
+						</span>
+						{!installing && (
+							<button
+								data-autofocus
+								onClick={closeInstall}
+								className="text-xs bg-accent text-white rounded-lg px-3 py-1.5 hover:opacity-90"
+							>
+								关闭
+							</button>
+						)}
+					</div>
+				</Modal>
+			)}
+		</>
+	);
 }

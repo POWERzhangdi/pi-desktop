@@ -7,8 +7,11 @@
  * 之后通过 store.reloadModels() 重新拉取可用模型。
  * 进入/退出有 180/150ms 淡入淡出,Esc 可关闭。
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/useSessionStore";
+import { confirmRestartIfBusy } from "../store/busy";
+import { confirmAction } from "../store/confirm";
+import { Spinner, SectionLabel, TestResultBlock, btnDanger, btnGhost, btnPrimary, inputCls, labelCls } from "./ui";
 import type {
 	CustomProvider,
 	CustomProviderModel,
@@ -26,59 +29,6 @@ type Selection =
 	| { kind: "new-custom" }
 	| null;
 
-/** 有工作区在跑任务时,保存前的确认(保存会重启后端、中断任务) */
-function confirmIfBusy(): boolean {
-	const busy = Object.values(useSessionStore.getState().byCwd).some((ws) => ws.isStreaming);
-	if (!busy) return true;
-	return window.confirm("当前有工作区正在运行任务。\n保存将重启全部后端进程并中断这些任务,确定继续吗?");
-}
-
-/* ---------------- 通用样式与小组件 ---------------- */
-
-const inputCls =
-	"w-full bg-ground border border-sep rounded-lg px-2.5 py-1.5 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 transition placeholder:text-txt2/60";
-const labelCls = "block text-xs text-txt2 mb-1";
-
-const btnPrimary =
-	"btn-press h-8 rounded-lg px-3 text-xs bg-accent text-white hover:bg-accent/90 disabled:opacity-40 inline-flex items-center gap-1.5";
-const btnGhost =
-	"btn-press h-8 rounded-lg px-3 text-xs border border-sep text-txt2 hover:text-txt hover:bg-side disabled:opacity-40 inline-flex items-center gap-1.5";
-const btnDanger =
-	"btn-press h-8 rounded-lg px-3 text-xs text-red hover:bg-red/10 disabled:opacity-40 inline-flex items-center gap-1.5";
-
-function Spinner() {
-	return (
-		<svg className="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none">
-			<circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.25" />
-			<path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-		</svg>
-	);
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-	return <h3 className="text-xs font-semibold text-txt2">{children}</h3>;
-}
-
-/** 测试连接结果块(淡入) */
-function TestResultBlock({
-	result,
-	okSuffix,
-}: {
-	result: ProviderTestResult;
-	okSuffix?: string;
-}) {
-	return (
-		<div
-			className={`animate-list text-xs rounded-lg px-3 py-2 ${
-				result.ok ? "bg-green/10 text-green" : "bg-red/10 text-red break-all whitespace-pre-wrap"
-			}`}
-		>
-			{result.ok
-				? `✓ 连接成功(${result.latencyMs ?? "?"}ms)${okSuffix ? ` · ${okSuffix}` : ""}`
-				: `✗ ${result.error ?? "连接失败"}`}
-		</div>
-	);
-}
 
 /** 内置 provider 状态点颜色:auth=绿 / env=橙 / 未配置=灰 */
 function builtinDotColor(source: "auth" | "env" | null): string {
@@ -153,14 +103,14 @@ function BuiltinDetail({
 	onChanged: () => Promise<void>;
 }) {
 	const [keyValue, setKeyValue] = useState("");
-	/** 拉取到的原始密钥,用于判断是否改动(避免无变更触发重启) */
-	const [originalKey, setOriginalKey] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [savedFlash, setSavedFlash] = useState(false);
 	const [testing, setTesting] = useState(false);
 	const [testResult, setTestResult] = useState<ProviderTestResult | null>(null);
 	const pushToast = useSessionStore((s) => s.pushToast);
 	const reloadModels = useSessionStore((s) => s.reloadModels);
+	/** 内置目录的 baseUrl/api 可能随 pi 升级漂移:优先用运行时模型清单里的真实值 */
+	const models = useSessionStore((s) => s.models);
 	const mountedRef = useRef(true);
 
 	useEffect(
@@ -170,39 +120,22 @@ function BuiltinDetail({
 		[],
 	);
 
-	// 已配置(auth)时拉取完整密钥回填(用户选择放宽安全边界,允许前端查看)
+	// 密钥永不回传渲染进程:切换 provider / 保存成功后清空输入,只展示掩码
 	useEffect(() => {
-		let cancelled = false;
 		setKeyValue("");
-		setOriginalKey("");
 		setTestResult(null);
-		if (provider.source === "auth") {
-			void (async () => {
-				try {
-					const full = await window.piApi.getProviderKey(provider.id);
-					if (!cancelled && typeof full === "string") {
-						setKeyValue(full);
-						setOriginalKey(full);
-					}
-				} catch {
-					/* 忽略读取失败 */
-				}
-			})();
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [provider.id, provider.source]);
+	}, [provider.id, provider.source, provider.maskedKey]);
 
 	const save = async () => {
 		const trimmed = keyValue.trim();
-		if (!trimmed || trimmed === originalKey) return;
-		if (!confirmIfBusy()) return;
+		// 留空 = 不修改(避免把掩码/占位当成新密钥写回去)
+		if (!trimmed) return;
+		if (!(await confirmRestartIfBusy())) return;
 		setSaving(true);
 		try {
 			await window.piApi.setProviderKey(provider.id, trimmed);
 			pushToast(`${provider.name} 密钥已保存,后端重启后生效`, "info");
-			setOriginalKey(trimmed);
+			setKeyValue("");
 			setSavedFlash(true);
 			window.setTimeout(() => {
 				if (mountedRef.current) setSavedFlash(false);
@@ -217,14 +150,19 @@ function BuiltinDetail({
 	};
 
 	const remove = async () => {
-		if (!window.confirm(`确定删除 ${provider.name} 的密钥吗?`)) return;
-		if (!confirmIfBusy()) return;
+		const ok = await confirmAction({
+			title: `删除 ${provider.name} 的密钥?`,
+			message: "删除后该提供商的模型将不可用,保存会重启全部后端。",
+			confirmText: "删除",
+			danger: true,
+		});
+		if (!ok) return;
+		if (!(await confirmRestartIfBusy())) return;
 		setSaving(true);
 		try {
 			await window.piApi.removeProviderKey(provider.id);
 			pushToast(`${provider.name} 密钥已删除,后端重启后生效`, "info");
 			setKeyValue("");
-			setOriginalKey("");
 			await reloadModels();
 			await onChanged();
 		} catch (err) {
@@ -238,13 +176,17 @@ function BuiltinDetail({
 		setTesting(true);
 		setTestResult(null);
 		try {
+			// pi 运行时给出的 baseUrl/api 优先;静态目录只是兜底
+			const live = models.find((m) => m.provider === provider.id && m.baseUrl);
 			setTestResult(
 				await window.piApi.testProviderConnection({
 					mode: "models",
-					api: provider.api,
-					baseUrl: provider.baseUrl,
+					api: live?.api ?? provider.api,
+					baseUrl: live?.baseUrl ?? provider.baseUrl,
 					apiKey: keyValue.trim() || undefined,
 					envVar: provider.envVar,
+					// 未填 key 时由主进程从 auth.json 取(明文不出主进程)
+					providerId: provider.id,
 				}),
 			);
 		} finally {
@@ -252,8 +194,8 @@ function BuiltinDetail({
 		}
 	};
 
-	const dirty = keyValue.trim() !== originalKey;
-	const canTest = !testing && (provider.source === "env" || !!keyValue.trim());
+	const dirty = keyValue.trim().length > 0;
+	const canTest = !testing && (provider.configured || dirty);
 
 	return (
 		<div className="space-y-5">
@@ -277,14 +219,20 @@ function BuiltinDetail({
 						value={keyValue}
 						onChange={setKeyValue}
 						onSubmit={() => void save()}
-						placeholder="粘贴 API Key,如 sk-…"
+						placeholder={
+							provider.source === "auth"
+								? `已配置 ${provider.maskedKey ?? "••••"},留空则保持不变`
+								: "粘贴 API Key,如 sk-…"
+						}
 						autoFocus={provider.source !== "auth"}
 					/>
 					{provider.source === "auth" && (
-						<div className="text-[11px] text-txt2">修改后点保存即更换;点小眼睛切换显隐。</div>
+						<div className="text-[11px] text-txt2">
+							出于安全考虑密钥不会回显;留空表示不修改,填入新值点保存即更换。
+						</div>
 					)}
 					<div className="flex items-center gap-2 pt-1">
-						<button onClick={() => void save()} disabled={saving || !keyValue.trim() || !dirty} className={btnPrimary}>
+						<button onClick={() => void save()} disabled={saving || !dirty} className={btnPrimary}>
 							{savedFlash ? "✓ 已保存" : saving ? "保存中…" : "保存"}
 						</button>
 						<button onClick={() => void runTest()} disabled={!canTest} className={btnGhost}>
@@ -384,7 +332,7 @@ function CustomProviderForm({
 
 	const save = async () => {
 		if (!valid) return;
-		if (!confirmIfBusy()) return;
+		if (!(await confirmRestartIfBusy())) return;
 		const models = parseModels(form.modelsText, form.reasoning);
 		setSaving(true);
 		try {
@@ -641,8 +589,14 @@ export default function ModelManagerPage() {
 	};
 
 	const removeCustom = async (p: CustomProvider) => {
-		if (!window.confirm(`确定删除自定义模型「${p.id}」吗?`)) return;
-		if (!confirmIfBusy()) return;
+		const ok = await confirmAction({
+			title: `删除自定义模型「${p.id}」?`,
+			message: "删除后会重启全部后端;该提供商的模型将不再可用。",
+			confirmText: "删除",
+			danger: true,
+		});
+		if (!ok) return;
+		if (!(await confirmRestartIfBusy())) return;
 		try {
 			await window.piApi.removeCustomProvider(p.id);
 			pushToast(`已删除「${p.id}」,后端重启后生效`, "info");

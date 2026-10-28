@@ -6,12 +6,8 @@
 import { create } from "zustand";
 import type { McpServerConfig, McpTestResult } from "../../../shared/ipc";
 import { useSessionStore } from "./useSessionStore";
+import { confirmRestartIfBusy } from "./busy";
 
-function confirmIfBusy(): boolean {
-	const busy = Object.values(useSessionStore.getState().byCwd).some((ws) => ws.isStreaming);
-	if (!busy) return true;
-	return window.confirm("当前有工作区正在运行任务。\n保存将重启全部后端进程并中断这些任务,确定继续吗?");
-}
 
 interface McpStoreState {
 	servers: McpServerConfig[];
@@ -23,7 +19,7 @@ interface McpStoreState {
 	test: (server: McpServerConfig) => Promise<McpTestResult>;
 }
 
-export const useMcpStore = create<McpStoreState>()((set, get) => ({
+export const useMcpStore = create<McpStoreState>()((set) => ({
 	servers: [],
 	loaded: false,
 
@@ -39,7 +35,7 @@ export const useMcpStore = create<McpStoreState>()((set, get) => ({
 	},
 
 	save: async (server, originalId) => {
-		if (!confirmIfBusy()) return false;
+		if (!(await confirmRestartIfBusy())) return false;
 		try {
 			const servers = await window.piApi.saveMcpServer(server, originalId);
 			set({ servers, loaded: true });
@@ -56,7 +52,7 @@ export const useMcpStore = create<McpStoreState>()((set, get) => ({
 	},
 
 	remove: async (serverId) => {
-		if (!confirmIfBusy()) return;
+		if (!(await confirmRestartIfBusy())) return;
 		try {
 			const servers = await window.piApi.removeMcpServer(serverId);
 			set({ servers, loaded: true });

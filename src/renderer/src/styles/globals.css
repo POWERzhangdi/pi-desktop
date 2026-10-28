@@ -18,6 +18,13 @@
 	--color-orange: var(--orange);
 	--color-yellow: var(--yellow);
 	--color-green: var(--green);
+	/* 可读前景色(彩底上的文字) */
+	--color-warn: var(--orange-fg);
+	--color-danger: var(--red-fg);
+	--color-ok: var(--green-fg);
+	--color-info: var(--purple-fg);
+	--color-diff-add: var(--diff-add-fg);
+	--color-diff-del: var(--diff-del-fg);
 }
 
 /* Kimi 官方 token(浅色) */
@@ -31,12 +38,21 @@
 	--sep: rgba(0, 0, 0, 0.1);
 	--accent: #1783ff;
 	--accent-soft: #e8f3ff;
-	--bubble: #1783ff;
-	--purple: #985ffb;
+	/* 用户气泡底:纯 #1783ff 上白字只有 3.67:1,压深到 5.0:1 */
+	--bubble: #0f6fd8;
+	--purple: #7c3aed;
 	--red: #ff3849;
 	--orange: #ff9500;
 	--yellow: #ffd230;
 	--green: #16c456;
+	/* 语义色的「可读前景」:彩底 + 同色文字时用这些(对比度 ≥ 4.5) */
+	--orange-fg: #b45309;
+	--red-fg: #c02434;
+	--green-fg: #0f7a3d;
+	--purple-fg: #6d28d9;
+	/* diff 增删行 */
+	--diff-add-fg: #0b6b34;
+	--diff-del-fg: #a11d2e;
 }
 
 /* Kimi 官方 token(深色) */
@@ -55,6 +71,12 @@
 	--orange: #ff9500;
 	--yellow: #ffd230;
 	--green: #16c456;
+	--orange-fg: #ffb454;
+	--red-fg: #ff8a95;
+	--green-fg: #6ee7a0;
+	--purple-fg: #c4a2ff;
+	--diff-add-fg: #7ee2a0;
+	--diff-del-fg: #ff9aa6;
 }
 
 html,
@@ -202,6 +224,19 @@ body {
 }
 .btn-press:active {
 	transform: scale(0.97);
+}
+
+/* 键盘焦点环:统一用 accent,替代浏览器默认的细橙圈。
+   用 :where() 保持 0 特异性,不影响输入框自己的 focus 边框。
+   仅 :focus-visible 生效,鼠标点击不会出现。 */
+:where(button, a, summary, [role="button"], [tabindex]):focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+/* 输入类控件已有自定义 focus 边框,只补一个柔和外环 */
+:where(input, textarea, select):focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+	outline-offset: 1px;
 }
 
 /* ---- 入场动画(@starting-style,无需 JS) ---- */

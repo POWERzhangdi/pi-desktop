@@ -44,7 +44,7 @@ function Popover({
 				onClick={() => !disabled && setOpen((v) => !v)}
 				disabled={disabled}
 				title={title}
-				className="btn-press flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs hover:bg-side disabled:opacity-40 disabled:cursor-not-allowed max-w-[260px] transition-colors"
+				className="btn-press flex items-center gap-1.5 h-7 rounded-lg px-2.5 text-xs hover:bg-side disabled:opacity-40 disabled:cursor-not-allowed max-w-[150px] xl:max-w-[260px] transition-colors"
 			>
 				{button}
 				<svg
@@ -238,6 +238,7 @@ export function ThinkingPicker() {
 		<Popover
 			disabled={!supported}
 			title={supported ? `思考等级:${thinkingLevelLabel[current] ?? current}` : "当前模型不支持思考"}
+			aria-label={supported ? `思考等级:${thinkingLevelLabel[current] ?? current}` : "当前模型不支持思考"}
 			button={
 				<>
 					<svg
@@ -255,7 +256,7 @@ export function ThinkingPicker() {
 						<path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
 						<path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
 					</svg>
-					<span className="text-xs">{thinkingLevelLabel[current] ?? current}</span>
+					<span className="hidden lg:inline text-xs">{thinkingLevelLabel[current] ?? current}</span>
 				</>
 			}
 		>

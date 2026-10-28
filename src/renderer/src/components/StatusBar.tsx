@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useActiveWs, useSessionStore } from "../store/useSessionStore";
 import { ModelPicker, ThinkingPicker } from "./ModelPicker";
 import ThemeToggle from "./ThemeToggle";
@@ -87,17 +87,17 @@ export default function StatusBar() {
 
 	return (
 		<div className="h-11 shrink-0 border-b border-sep bg-card/80 backdrop-blur-md flex items-center px-3 text-sm">
-			{/* 选择器组(同高 ghost 按钮) */}
-			<div className="flex items-center gap-2">
+			{/* 选择器组(同高 ghost 按钮);窄窗口下由子组件自己收缩 */}
+			<div className="flex items-center gap-2 min-w-0">
 				<ModelPicker />
 				<ThinkingPicker />
 			</div>
 
 			<Divider />
 
-			{/* token / 成本 / 上下文用量 */}
-			<div className="flex items-center gap-2.5 text-xs text-txt2 shrink-0 tabular-nums">
-				{stats && (
+			{/* token / 成本 / 上下文用量:窄窗口隐藏(信息仍可在会话详情看到) */}
+			<div className="hidden lg:flex items-center gap-2.5 text-xs text-txt2 shrink-0 tabular-nums">
+				{stats && (stats.tokens.total > 0 || stats.cost > 0) && (
 					<>
 						<span className="flex items-center gap-1" title="会话累计 tokens">
 							<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-accent"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" /></svg>
@@ -109,7 +109,7 @@ export default function StatusBar() {
 						</span>
 					</>
 				)}
-				{ctx && (
+				{ctx && ctx.percent != null && (
 					<ContextRing
 						percent={ctx.percent ?? null}
 						compacting={"compaction" in statusEntries}
@@ -119,14 +119,14 @@ export default function StatusBar() {
 			</div>
 
 			{/* 中间弹性区:扩展状态文本 / 排队提示(出现时不挤压左侧布局) */}
-			<div className="flex-1 min-w-0 flex items-center gap-2 px-3">
+			<div className="flex-1 min-w-0 flex items-center gap-2 px-2 lg:px-3">
 				{statusTexts.map((t, i) => (
 					<span key={i} className="text-xs text-purple truncate">
 						{t}
 					</span>
 				))}
 				{pendingCount > 0 && (
-					<span className="text-xs text-orange shrink-0">{pendingCount} 条排队中</span>
+					<span className="text-xs text-warn shrink-0">{pendingCount} 条排队中</span>
 				)}
 			</div>
 

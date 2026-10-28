@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import WorkspaceList from "./WorkspaceList";
 import EnvSettingsDialog from "./EnvSettingsDialog";
-import McpManagerPage from "./McpManagerPage";
 import Tooltip from "./Tooltip";
 import { useMcpStore } from "../store/useMcpStore";
 import { useSessionStore } from "../store/useSessionStore";
+
+/** MCP 管理页按需加载(低频入口) */
+const McpManagerPage = lazy(() => import("./McpManagerPage"));
 
 /** 左侧栏:品牌顶栏 + workspace 列表 + 底部固定操作栏(添加工作区/设置) */
 export default function Sidebar() {
@@ -12,6 +14,7 @@ export default function Sidebar() {
 	const envOpen = useSessionStore((s) => s.envSettingsOpen);
 	const setEnvOpen = useSessionStore((s) => s.setEnvSettingsOpen);
 	const [mcpOpen, setMcpOpen] = useState(false);
+	const [mcpLoaded, setMcpLoaded] = useState(false);
 	const mcpServers = useMcpStore((s) => s.servers);
 	const loadMcp = useMcpStore((s) => s.load);
 
@@ -19,6 +22,11 @@ export default function Sidebar() {
 	useEffect(() => {
 		void loadMcp();
 	}, [loadMcp]);
+
+	// 首次打开 MCP 管理页时才加载它的 chunk
+	useEffect(() => {
+		if (mcpOpen) setMcpLoaded(true);
+	}, [mcpOpen]);
 
 	const enabledMcpCount = mcpServers.filter((s) => s.enabled).length;
 
@@ -37,6 +45,7 @@ export default function Sidebar() {
 				<button
 					onClick={() => void addWorkspace()}
 					title="添加工作区"
+					aria-label="添加工作区"
 					className="btn-press w-8 h-8 flex items-center justify-center text-txt2 hover:text-accent rounded-lg hover:bg-card"
 				>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
@@ -50,6 +59,7 @@ export default function Sidebar() {
 				>
 					<button
 						onClick={() => setMcpOpen(true)}
+						aria-label="MCP 服务器"
 						className="btn-press w-8 h-8 flex items-center justify-center text-txt2 hover:text-accent rounded-lg hover:bg-card"
 					>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22v-5" /><path d="M9 8V2" /><path d="M15 8V2" /><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8z" /></svg>
@@ -58,6 +68,7 @@ export default function Sidebar() {
 				<button
 					onClick={() => setEnvOpen(true)}
 					title="设置"
+					aria-label="设置"
 					className="btn-press w-8 h-8 flex items-center justify-center text-txt2 hover:text-accent rounded-lg hover:bg-card"
 				>
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
@@ -65,7 +76,11 @@ export default function Sidebar() {
 			</div>
 
 			<EnvSettingsDialog open={envOpen} onClose={() => setEnvOpen(false)} />
-			<McpManagerPage open={mcpOpen} onClose={() => setMcpOpen(false)} />
+			{mcpLoaded && (
+				<Suspense fallback={null}>
+					<McpManagerPage open={mcpOpen} onClose={() => setMcpOpen(false)} />
+				</Suspense>
+			)}
 		</aside>
 	);
 }

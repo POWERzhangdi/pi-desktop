@@ -91,7 +91,7 @@ function DiffView({ oldText, newText }: { oldText: string; newText: string }) {
 	return (
 		<pre className="font-mono text-xs rounded-lg border border-sep overflow-x-auto my-1.5 max-h-96 overflow-y-auto">
 			{parts.map((p, i) => {
-				const cls = p.added ? "bg-green/15 text-green" : p.removed ? "bg-red/15 text-red" : "text-txt2";
+				const cls = p.added ? "bg-green/15 text-diff-add" : p.removed ? "bg-red/15 text-diff-del" : "text-txt2";
 				const sign = p.added ? "+ " : p.removed ? "- " : "  ";
 				return (
 					<div key={i} className={`${cls} px-2 whitespace-pre-wrap break-all`}>

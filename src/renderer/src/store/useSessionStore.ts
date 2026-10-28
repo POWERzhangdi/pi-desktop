@@ -5,7 +5,7 @@
  */
 import { create } from "zustand";
 import { loadModelPrefs } from "./modelPrefs";
-import { loadApprovalModes, saveApprovalMode } from "./approvalMode";
+import { contentToText } from "../../../shared/text";
 import type {
 	AgentMessage,
 	AssistantMessage,
@@ -20,6 +20,7 @@ import type {
 	UserMessage,
 } from "../../../shared/rpc-types";
 import type {
+	ApprovalMode,
 	BackendStatus,
 	BackendStatusEnvelope,
 	RpcEventEnvelope,
@@ -129,20 +130,6 @@ function nextMsgId(): string {
 
 let toastSeq = 0;
 
-/** 从 content(string 或 blocks)提取纯文本 */
-export function contentToText(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (Array.isArray(content)) {
-		return content
-			.filter(
-				(b): b is { type: string; text: string } =>
-					typeof b === "object" && b !== null && (b as { type?: string }).type === "text",
-			)
-			.map((b) => b.text)
-			.join("");
-	}
-	return "";
-}
 
 /** 从工具结果载荷提取文本 */
 function payloadToText(payload: unknown): string {
@@ -666,6 +653,8 @@ interface SessionStore {
 
 	sendPrompt: (text: string, images?: ImageContent[]) => Promise<void>;
 	abort: () => Promise<void>;
+	/** 重发上一条用户消息(无回退语义,等价于再发一遍) */
+	retryLast: () => Promise<void>;
 	/** 手动压缩上下文:发 { type: "compact" } RPC;compaction_start/end 事件已由 reduceEvent 归并 */
 	compact: () => Promise<void>;
 	newSession: () => Promise<void>;
@@ -703,12 +692,9 @@ interface SessionStore {
 	/** OCR 引擎:tesseract(默认,纯JS) / rapidocr(强,需 Python+包);持久化 localStorage */
 	ocrEngine: "tesseract" | "rapidocr";
 	setOcrEngine: (e: "tesseract" | "rapidocr") => void;
-	/** 命令审批模式(per-workspace):full=完全访问(危险命令自动放行),approve=审批(弹框) */
-	approvalModeByCwd: Record<string, "full" | "approve">;
-	/** 本轮自动批准(内存态,agent_start 重置) */
-	autoApproveTurnByCwd: Record<string, boolean>;
-	setApprovalMode: (cwd: string, mode: "full" | "approve") => void;
-	setAutoApproveTurn: (cwd: string, val: boolean) => void;
+	/** 命令审批模式(per-workspace,权威在主进程,这里只是镜像用于展示/切换) */
+	approvalModeByCwd: Record<string, ApprovalMode>;
+	setApprovalMode: (cwd: string, mode: ApprovalMode) => void;
 	/** provider/模型配置变更后:重新拉取可用模型与思考等级,并恢复当前工作区的模型偏好 */
 	reloadModels: () => Promise<void>;
 }
@@ -832,6 +818,61 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 		if (changed) await refreshActiveState();
 	}
 
+	/* ---------------- 事件归并(含水合缓冲) ---------------- */
+
+	/** 水合中的 workspace:此时到达的事件先入缓冲,水合完成后再按序回放 */
+	const hydrating = new Set<string>();
+	const hydrationBuffer = new Map<string, Record<string, unknown>[]>();
+
+	/** 单条事件归并(不含缓冲逻辑) */
+	function applyEvent(cwd: string, evt: Record<string, unknown>): void {
+		set((s) => {
+			const ws = s.byCwd[cwd] ?? emptyWs();
+			const { ws: next, toasts } = reduceEvent(ws, evt);
+			// toast 副作用在 set 外发
+			queueMicrotask(() => {
+				for (const t of toasts) get().pushToast(t.message, t.kind);
+			});
+			return { byCwd: { ...s.byCwd, [cwd]: next } };
+		});
+
+		// 后台 workspace 的注意力提示
+		if (cwd !== get().activeCwd) {
+			if (evt.type === "agent_end") {
+				get().pushToast(`「${wsName(cwd)}」任务完成`, "info", cwd);
+			} else if (
+				evt.type === "extension_ui_request" &&
+				["confirm", "select", "input", "editor"].includes(String((evt as { method?: string }).method))
+			) {
+				get().pushToast(`「${wsName(cwd)}」有一个确认请求`, "warning", cwd);
+			}
+		}
+
+		// 一轮结束后刷新会话列表(新会话/标题更新)
+		if (evt.type === "agent_end") void get().refreshSessions();
+		// 压缩结束后刷新统计(环形/占用数据随之更新)
+		if (evt.type === "compaction_end") void get().refreshActive();
+	}
+
+	/** 水合期间先缓冲,避免 get_entries 整体替换时丢掉刚到的流式增量 */
+	function dispatchEvent(cwd: string, evt: Record<string, unknown>): void {
+		if (hydrating.has(cwd)) {
+			const list = hydrationBuffer.get(cwd) ?? [];
+			list.push(evt);
+			hydrationBuffer.set(cwd, list);
+			return;
+		}
+		applyEvent(cwd, evt);
+	}
+
+	/** 水合结束:回放缓冲事件 */
+	function flushHydration(cwd: string): void {
+		hydrating.delete(cwd);
+		const pending = hydrationBuffer.get(cwd) ?? [];
+		hydrationBuffer.delete(cwd);
+		for (const evt of pending) applyEvent(cwd, evt);
+	}
+
 	return {
 		activeCwd: "",
 		byCwd: {},
@@ -845,11 +886,16 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 		toasts: [],
 		expandedCwds: {},
 		ocrEngine: localStorage.getItem("ocrEngine") === "rapidocr" ? "rapidocr" : "tesseract",
-		approvalModeByCwd: loadApprovalModes(),
-		autoApproveTurnByCwd: {},
+		approvalModeByCwd: {},
 
 		init: async () => {
 			try {
+				// 审批模式由主进程持有(安全策略不在渲染进程),启动时同步一次
+				try {
+					set({ approvalModeByCwd: await window.piApi.getApprovalModes() });
+				} catch {
+					/* 首次运行可能还没有审批配置 */
+				}
 				const cfg = await window.piApi.getConfig();
 				await get().refreshWorkspaces();
 				await get().refreshSessions();
@@ -864,61 +910,24 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 		},
 
 		handleEnvelope: (env) => {
-			const { cwd, evt } = env;
-
-			// 命令审批 confirm:完全访问或本轮自动批准 -> 自动放行,不弹框
-			if (
-				evt.type === "extension_ui_request" &&
-				evt.method === "confirm" &&
-				evt.title === "命令审批"
-			) {
-				const mode = get().approvalModeByCwd[cwd] ?? "full";
-				if (mode === "full" || get().autoApproveTurnByCwd[cwd]) {
-					const id = evt.id;
-					if (typeof id === "string") {
-						void window.piApi
-							.sendCommand(cwd, { type: "extension_ui_response", id, confirmed: true })
-							.catch(() => {});
-					}
-					return;
-				}
-			}
-
-			// agent_start:新一轮,重置"本轮自动批准"
-			if (evt.type === "agent_start" && get().autoApproveTurnByCwd[cwd]) {
-				set((s) => ({ autoApproveTurnByCwd: { ...s.autoApproveTurnByCwd, [cwd]: false } }));
-			}
-
-			set((s) => {
-				const ws = s.byCwd[cwd] ?? emptyWs();
-				const { ws: next, toasts } = reduceEvent(ws, evt);
-				// toast 副作用在 set 外发
-				queueMicrotask(() => {
-					for (const t of toasts) get().pushToast(t.message, t.kind);
-				});
-				return { byCwd: { ...s.byCwd, [cwd]: next } };
-			});
-
-			// 后台 workspace 的注意力提示
-			if (cwd !== get().activeCwd) {
-				if (evt.type === "agent_end") {
-					get().pushToast(`「${wsName(cwd)}」任务完成`, "info", cwd);
-				} else if (
-					evt.type === "extension_ui_request" &&
-					["confirm", "select", "input", "editor"].includes(String((evt as { method?: string }).method))
-				) {
-					get().pushToast(`「${wsName(cwd)}」有一个确认请求`, "warning", cwd);
-				}
-			}
-
-			// 一轮结束后刷新会话列表(新会话/标题更新)
-			if (evt.type === "agent_end") void get().refreshSessions();
-			// 压缩结束后刷新统计(环形/占用数据随之更新)
-			if (evt.type === "compaction_end") void get().refreshActive();
+			dispatchEvent(env.cwd, env.evt);
 		},
 
 		handleStatusEnvelope: (env) => {
-			set((s) => ({ backendByCwd: { ...s.backendByCwd, [env.cwd]: env.status } }));
+			set((s) => {
+				const backendByCwd = { ...s.backendByCwd, [env.cwd]: env.status };
+				if (env.status.state !== "crashed") return { backendByCwd };
+				// 进程崩溃:清掉流式标记与待确认队列,否则 UI 会停在"停止/等待审批"
+				const ws = s.byCwd[env.cwd];
+				if (!ws) return { backendByCwd };
+				return {
+					backendByCwd,
+					byCwd: {
+						...s.byCwd,
+						[env.cwd]: { ...ws, isStreaming: false, pendingCount: 0, uiQueue: [] },
+					},
+				};
+			});
 		},
 
 		setActive: async (cwd) => {
@@ -931,6 +940,8 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 			await applyModelPref(cwd);
 			// 桶为空且进程里已有会话内容 → 水合(应用重启后恢复画面)
 			if (activeWs().messages.length === 0) {
+				// 水合期间到达的事件先缓冲,完成后回放:否则整体替换会把刚到的流式增量冲掉
+				hydrating.add(cwd);
 				try {
 					const resp = await window.piApi.sendCommand(cwd, { type: "get_entries" });
 					const entries =
@@ -940,6 +951,8 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 					}
 				} catch {
 					/* 新进程无历史属正常 */
+				} finally {
+					flushHydration(cwd);
 				}
 			}
 			await loadGlobals(cwd);
@@ -969,6 +982,19 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 			} catch (err) {
 				get().pushToast(`中止失败:${(err as Error).message}`, "error");
 			}
+		},
+
+		/** 重发上一条用户消息(pi RPC 没有"重试/回退"语义,这里就是再发一遍) */
+		retryLast: async () => {
+			const cwd = get().activeCwd;
+			if (!cwd) return;
+			const msgs = get().byCwd[cwd]?.messages ?? [];
+			const last = [...msgs].reverse().find((m) => m.role === "user" && m.text);
+			if (!last?.text) {
+				get().pushToast("没有可重发的消息", "warning");
+				return;
+			}
+			await get().sendPrompt(last.text);
 		},
 
 		compact: async () => {
@@ -1145,7 +1171,7 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 			const ok = await window.piApi.sessionDelete(filePath);
 			if (!ok) {
 				get().pushToast("删除会话失败", "error");
-			return;
+				return;
 			}
 			const cwd = get().activeCwd;
 			const wasActive = get().byCwd[cwd]?.activeSessionFile === filePath;
@@ -1160,7 +1186,7 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 			const ok = await window.piApi.sessionArchive(filePath);
 			if (!ok) {
 				get().pushToast("归档会话失败", "error");
-			return;
+				return;
 			}
 			const cwd = get().activeCwd;
 			const wasActive = get().byCwd[cwd]?.activeSessionFile === filePath;
@@ -1185,7 +1211,9 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 		pushToast: (message, kind = "info", actionCwd) => {
 			const id = ++toastSeq;
 			set((s) => ({ toasts: [...s.toasts, { id, message, kind, actionCwd }] }));
-			setTimeout(() => get().dismissToast(id), 2000);
+			// 停留时长按重要性区分:错误要留够读的时间,带"前往"的也不能一闪而过
+			const ttlMs = kind === "error" ? 8000 : kind === "warning" ? 5000 : actionCwd ? 5000 : 3000;
+			setTimeout(() => get().dismissToast(id), ttlMs);
 		},
 
 		dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
@@ -1202,11 +1230,11 @@ export const useSessionStore = create<SessionStore>()((set, get) => {
 		},
 
 		setApprovalMode: (cwd, mode) => {
-			saveApprovalMode(cwd, mode);
+			// 先乐观更新 UI,再交给主进程落盘(主进程是权威,失败会提示)
 			set((s) => ({ approvalModeByCwd: { ...s.approvalModeByCwd, [cwd]: mode } }));
-		},
-		setAutoApproveTurn: (cwd, val) => {
-			set((s) => ({ autoApproveTurnByCwd: { ...s.autoApproveTurnByCwd, [cwd]: val } }));
+			void window.piApi.setApprovalMode(cwd, mode).catch((err) => {
+				get().pushToast(`审批模式保存失败:${(err as Error).message}`, "error");
+			});
 		},
 
 		reloadModels: async () => {

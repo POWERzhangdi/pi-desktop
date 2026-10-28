@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSessionStore } from "../store/useSessionStore";
+import { confirmAction } from "../store/confirm";
 import type { WorkspaceInfo } from "../../../shared/ipc";
 
 /** 相对时间格式化 */
@@ -78,30 +79,36 @@ function WorkspaceBlock({ w }: { w: WorkspaceInfo }) {
 
 	return (
 		<div className="rounded-xl mb-1">
-			{/* 工作区头部 */}
+			{/* 工作区头部:整行是容器,可点击区域独立成 button(否则内部按钮嵌套非法,键盘也无法聚焦) */}
 			<div
-				className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-xl cursor-pointer transition-colors duration-150 ease-[var(--ease-out)] border-l-2 ${
+				className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-xl transition-colors duration-150 ease-[var(--ease-out)] border-l-2 ${
 					isActive ? "bg-accent-soft border-accent" : "border-transparent hover:bg-side"
 				}`}
-				onClick={() => {
-					if (!isActive) {
-						void setActive(w.cwd);
-						if (!expanded) toggleExpanded(w.cwd);
-					} else {
-						toggleExpanded(w.cwd);
-					}
-				}}
-				title={w.cwd}
 			>
-				<StatusDot cwd={w.cwd} />
-				<span className="flex-1 min-w-0 flex items-baseline gap-1.5">
-					<span className={`text-sm truncate ${isActive ? "text-accent font-medium" : ""}`}>
-						{w.name}
+				<button
+					type="button"
+					onClick={() => {
+						if (!isActive) {
+							void setActive(w.cwd);
+							if (!expanded) toggleExpanded(w.cwd);
+						} else {
+							toggleExpanded(w.cwd);
+						}
+					}}
+					title={w.cwd}
+					aria-expanded={expanded}
+					className="flex-1 min-w-0 flex items-center gap-1.5 text-left cursor-pointer rounded-md"
+				>
+					<StatusDot cwd={w.cwd} />
+					<span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+						<span className={`text-sm truncate ${isActive ? "text-accent font-medium" : ""}`}>
+							{w.name}
+						</span>
+						<span className="text-[10px] text-txt2 shrink-0">
+							{w.sessionCount > 0 ? `${w.sessionCount} 会话` : "无会话"}
+						</span>
 					</span>
-					<span className="text-[10px] text-txt2 shrink-0">
-						{w.sessionCount > 0 ? `${w.sessionCount} 会话` : "无会话"}
-					</span>
-				</span>
+				</button>
 
 				{/* 新会话加号(工作区右上角) */}
 				<button
@@ -110,7 +117,8 @@ function WorkspaceBlock({ w }: { w: WorkspaceInfo }) {
 						void newSessionIn(w.cwd);
 					}}
 					title={`在「${w.name}」新建会话`}
-					className="shrink-0 w-6 h-6 rounded-lg text-txt2 hover:text-accent hover:bg-accent-soft flex items-center justify-center btn-press opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+					aria-label={`在「${w.name}」新建会话`}
+					className="shrink-0 w-6 h-6 rounded-lg text-txt2 hover:text-accent hover:bg-accent-soft flex items-center justify-center btn-press opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity duration-150"
 				>
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
 				</button>
@@ -123,7 +131,9 @@ function WorkspaceBlock({ w }: { w: WorkspaceInfo }) {
 							setMenuOpen((v) => !v);
 						}}
 						title="更多"
-						className="btn-press w-6 h-6 rounded-lg text-txt2 hover:text-txt hover:bg-side flex items-center justify-center transition-opacity duration-150 opacity-0 group-hover:opacity-100"
+						aria-label={`「${w.name}」更多操作`}
+						aria-expanded={menuOpen}
+						className="btn-press w-6 h-6 rounded-lg text-txt2 hover:text-txt hover:bg-side flex items-center justify-center transition-opacity duration-150 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
 					>
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
 					</button>
@@ -146,9 +156,15 @@ function WorkspaceBlock({ w }: { w: WorkspaceInfo }) {
 								onClick={(e) => {
 									e.stopPropagation();
 									setMenuOpen(false);
-									if (window.confirm(`删除工作区「${w.name}」?\n仅从列表移除,不删除磁盘文件;有会话历史的目录需手动添加找回。`)) {
-										void removeWorkspace(w.cwd);
-									}
+									void (async () => {
+										const ok = await confirmAction({
+											title: `删除工作区「${w.name}」?`,
+											message: "仅从列表移除,不删除磁盘文件。\n有会话历史的目录需要手动重新添加才能找回。",
+											confirmText: "删除",
+											danger: true,
+										});
+										if (ok) await removeWorkspace(w.cwd);
+									})();
 								}}
 								className="w-full text-left text-sm px-3 py-1.5 text-red hover:bg-red/10"
 							>
@@ -168,30 +184,47 @@ function WorkspaceBlock({ w }: { w: WorkspaceInfo }) {
 					{wsSessions.map((s) => (
 						<div
 							key={s.filePath}
-							onClick={() => void openSession(w.cwd, s.filePath)}
-							title={s.filePath}
-							className={`group w-full text-left rounded-lg px-2 py-1.5 mb-0.5 transition-colors duration-150 flex items-center gap-1.5 border-l-2 cursor-pointer ${
+							className={`group w-full text-left rounded-lg px-2 py-1.5 mb-0.5 transition-colors duration-150 flex items-center gap-1.5 border-l-2 ${
 								s.filePath === activeSessionFile
 									? "bg-purple/15 text-purple border-purple"
 									: "border-transparent hover:bg-side"
 							}`}
 						>
-							<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-txt2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-							<span className="flex-1 min-w-0 flex items-baseline gap-1.5">
-								<span className="text-xs truncate">{s.title}</span>
-								<span className="text-[10px] text-txt2 shrink-0">{relativeTime(s.mtimeMs)}</span>
-							</span>
-							<div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+							<button
+								type="button"
+								onClick={() => void openSession(w.cwd, s.filePath)}
+								title={s.filePath}
+								className="flex-1 min-w-0 flex items-center gap-1.5 text-left cursor-pointer rounded-md"
+							>
+								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-txt2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+								<span className="flex-1 min-w-0 flex items-baseline gap-1.5">
+									<span className="text-xs truncate">{s.title}</span>
+									<span className="text-[10px] text-txt2 shrink-0">{relativeTime(s.mtimeMs)}</span>
+								</span>
+							</button>
+							<div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
 								<button
-									onClick={(e) => { e.stopPropagation(); void archiveSession(s.filePath); }}
+									onClick={() => void archiveSession(s.filePath)}
 									title="归档"
+									aria-label={`归档会话「${s.title}」`}
 									className="btn-press w-5 h-5 flex items-center justify-center text-txt2 hover:text-accent rounded"
 								>
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" /></svg>
 								</button>
 								<button
-									onClick={(e) => { e.stopPropagation(); void deleteSession(s.filePath); }}
+									onClick={() => {
+										void (async () => {
+											const ok = await confirmAction({
+												title: "删除会话?",
+												message: `「${s.title}」的会话记录(.jsonl)会被永久删除,无法恢复。\n想保留文件请改用"归档"。`,
+												confirmText: "删除",
+												danger: true,
+											});
+											if (ok) await deleteSession(s.filePath);
+										})();
+									}}
 									title="删除"
+									aria-label={`删除会话「${s.title}」`}
 									className="btn-press w-5 h-5 flex items-center justify-center text-txt2 hover:text-red rounded"
 								>
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
@@ -226,21 +259,29 @@ function ArchivedSection({ items }: { items: WorkspaceInfo[] }) {
 					{items.map((w) => (
 						<div key={w.cwd} className="group flex items-center gap-1.5 px-2 py-1 pl-4 rounded-lg hover:bg-side" title={w.cwd}>
 							<span className="flex-1 min-w-0 text-xs text-txt2 truncate">{w.name}</span>
-							<div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+							<div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
 								<button
 									onClick={() => void restoreWorkspace(w.cwd)}
 									title="恢复"
+									aria-label={`恢复工作区「${w.name}」`}
 									className="btn-press w-5 h-5 flex items-center justify-center text-txt2 hover:text-accent rounded"
 								>
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
 								</button>
 								<button
 									onClick={() => {
-										if (window.confirm(`彻底删除工作区「${w.name}」?\n仅从列表移除,不删除磁盘文件。`)) {
-											void removeWorkspace(w.cwd);
-										}
+										void (async () => {
+											const ok = await confirmAction({
+												title: `彻底删除工作区「${w.name}」?`,
+												message: "仅从列表移除,不删除磁盘文件。",
+												confirmText: "删除",
+												danger: true,
+											});
+											if (ok) await removeWorkspace(w.cwd);
+										})();
 									}}
 									title="删除"
+									aria-label={`彻底删除工作区「${w.name}」`}
 									className="btn-press w-5 h-5 flex items-center justify-center text-txt2 hover:text-red rounded"
 								>
 									<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" /></svg>
